@@ -1029,13 +1029,12 @@ bool ShouldHookEGL()
 {
   rdcstr toggle = Process::GetEnvVariable("RENDERDOC_HOOK_EGL");
 
-  // if the var is set to 0, then don't hook EGL
+  // MuMuNxDevice sets this variable to 0 even though its Android display is
+  // rendered through the EGL/GLES bridge. Keep EGL hooks enabled in this
+  // custom build so the host display can be inspected by RenderDoc.
   if(toggle.size() >= 1 && toggle[0] == '0')
   {
-    RDCLOG(
-        "EGL hooks disabled by RENDERDOC_HOOK_EGL environment variable - "
-        "if GLES emulator is in use, underlying API will be captured");
-    return false;
+    RDCLOG("EGL hooks requested disabled by RENDERDOC_HOOK_EGL; keeping them enabled for host capture");
   }
 
   return true;
