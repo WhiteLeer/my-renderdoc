@@ -24,9 +24,12 @@
 
 #include <QApplication>
 #include <QDebug>
+#include <QFile>
 #include <QDir>
+#include <QDateTime>
 #include <QMutexLocker>
 #include <QStandardPaths>
+#include <QTextStream>
 #include "Code/QRDUtils.h"
 #include "Styles/StyleData.h"
 #include "QRDInterface.h"
@@ -391,21 +394,49 @@ void PersistantConfig::UpdateEnumeratedProtocolDevices()
 {
   rdcarray<RemoteHost> enumeratedDevices;
 
+  QFile diagnosticLog(QDir::current().filePath(lit("mumu-device-enumeration.log")));
+  diagnosticLog.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
+  QTextStream diagnosticOutput(&diagnosticLog);
+  auto diagnostic = [&diagnosticOutput](const QString &message) {
+    diagnosticOutput << QDateTime::currentDateTimeUtc().toString(Qt::ISODate) << " " << message
+                     << '\n';
+    diagnosticOutput.flush();
+  };
+
   rdcarray<rdcstr> protocols;
   RENDERDOC_GetSupportedDeviceProtocols(&protocols);
+
+  diagnostic(QStringLiteral("supported protocols: %1").arg(protocols.size()));
+  qInfo() << "Enumerating device protocols (" << protocols.size() << " supported)";
 
   for(const rdcstr &p : protocols)
   {
     IDeviceProtocolController *protocol = RENDERDOC_GetDeviceProtocolController(p);
 
+    if(protocol == NULL)
+    {
+      qWarning() << "Device protocol '" << QString(p) << "' returned no controller";
+      continue;
+    }
+
     rdcarray<rdcstr> devices = protocol->GetDevices();
+
+    diagnostic(QStringLiteral("protocol %1: %2 device(s)").arg(QString(p)).arg(devices.size()));
+    qInfo() << "Device protocol '" << QString(p) << "' enumerated " << devices.size()
+            << " device(s)";
 
     for(const rdcstr &d : devices)
     {
+      diagnostic(QStringLiteral("device: %1://%2").arg(QString(protocol->GetProtocolName()))
+                     .arg(QString(d)));
+      qInfo() << "  device '" << QString(d) << "'";
       RemoteHost newhost(protocol->GetProtocolName() + "://" + d);
       enumeratedDevices.push_back(newhost);
     }
   }
+
+  qInfo() << "Device enumeration produced " << enumeratedDevices.size() << " host(s)";
+  diagnostic(QStringLiteral("total hosts: %1").arg(enumeratedDevices.size()));
 
   QMutexLocker autolock(&RemoteHostLock);
 

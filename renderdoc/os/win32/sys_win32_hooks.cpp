@@ -336,6 +336,7 @@ private:
     if(lpApplicationName)
     {
       rdcstr app = strlower(StringFormat::Wide2UTF8(lpApplicationName));
+      RDCDEBUG("Child launch candidate app=%s", app.c_str());
 
       if(app.contains("renderdoccmd.exe") || app.contains("qrenderdoc.exe"))
       {
@@ -345,6 +346,22 @@ private:
     if(lpCommandLine)
     {
       rdcstr cmd = strlower(StringFormat::Wide2UTF8(lpCommandLine));
+      RDCDEBUG("Child launch candidate cmd=%s", cmd.c_str());
+
+      // MuMu's crash reporter is not a graphics process. Avoid injecting it,
+      // while keeping the hook available for renderer/helper processes.
+      if(cmd.contains("crashpad_handler.exe"))
+      {
+        RDCDEBUG("Skipping crashpad child injection");
+        return false;
+      }
+
+      if(cmd.contains("sc.exe") || cmd.contains("rendererdetector.exe") ||
+         cmd.contains("mumumanager.exe"))
+      {
+        RDCDEBUG("Skipping MuMu utility child injection");
+        return false;
+      }
 
       if(cmd.contains("renderdoccmd.exe") || cmd.contains("qrenderdoc.exe"))
       {

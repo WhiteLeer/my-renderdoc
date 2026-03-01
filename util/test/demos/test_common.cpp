@@ -260,10 +260,6 @@ void LoadXPM(const char **XPM, Texture &tex)
 // having to remove the built shaderc files
 #define USE_LINKED_SHADERC (1 && HAVE_SHADERC)
 
-#if !USE_LINKED_SHADERC && defined(ANDROID)
-#error "can't execute shaderc on android"
-#endif
-
 #if USE_LINKED_SHADERC
 #include <shaderc/shaderc.h>
 #else

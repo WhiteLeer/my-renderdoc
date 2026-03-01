@@ -1029,14 +1029,14 @@ bool ShouldHookEGL()
 {
   rdcstr toggle = Process::GetEnvVariable("RENDERDOC_HOOK_EGL");
 
-  // if the var is set to 0, then don't hook EGL
-  if(toggle.size() >= 1 && toggle[0] == '0')
-  {
-    RDCLOG(
-        "EGL hooks disabled by RENDERDOC_HOOK_EGL environment variable - "
-        "if GLES emulator is in use, underlying API will be captured");
+  char processName[MAX_PATH] = {};
+  GetModuleFileNameA(NULL, processName, ARRAY_COUNT(processName));
+  const char *baseName = strrchr(processName, '\\');
+  baseName = baseName ? baseName + 1 : processName;
+  bool isMuMuDevice = !_stricmp(baseName, "MuMuNxDevice.exe");
+
+  if(toggle.size() >= 1 && toggle[0] == '0' && !isMuMuDevice)
     return false;
-  }
 
   return true;
 }

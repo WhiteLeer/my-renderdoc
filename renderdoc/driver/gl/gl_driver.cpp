@@ -2055,6 +2055,14 @@ void WrappedOpenGL::RefreshDerivedReplacements()
 
 void WrappedOpenGL::SwapBuffers(WindowingSystem winSystem, void *windowHandle)
 {
+  static uint32_t swapLogCount = 0;
+  uint32_t swapLogIndex = swapLogCount++;
+  if(swapLogIndex < 5 || (swapLogIndex % 1000) == 0)
+  {
+    RDCLOG("OpenGL SwapBuffers observed: count=%u frame=%u system=%u window=%p state=%u", swapLogIndex,
+           m_FrameCounter, (uint32_t)winSystem, windowHandle, (uint32_t)m_State);
+  }
+
   if(IsBackgroundCapturing(m_State))
     RenderDoc::Inst().Tick();
 
