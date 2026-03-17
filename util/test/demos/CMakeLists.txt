@@ -283,9 +283,15 @@ install(TARGETS demos DESTINATION .)
 if(BUILD_ANDROID)
     set(SHADERC_DIR "dummy")
     set(BIN_SUFFIX "")
-    target_link_libraries(demos PRIVATE ${ANDROID_NDK_ROOT_PATH}/sources/third_party/shaderc/obj/local/${ANDROID_ABI}/libshaderc_combined.a)
-    target_compile_definitions(demos PRIVATE -DHAVE_SHADERC=1)
-    target_include_directories(demos PRIVATE ${ANDROID_NDK_ROOT_PATH}/sources/third_party/shaderc/include)
+    set(ANDROID_SHADERC_LIB "${ANDROID_NDK_ROOT_PATH}/sources/third_party/shaderc/obj/local/${ANDROID_ABI}/libshaderc_combined.a")
+    if(EXISTS "${ANDROID_SHADERC_LIB}")
+        target_link_libraries(demos PRIVATE ${ANDROID_SHADERC_LIB})
+        target_compile_definitions(demos PRIVATE -DHAVE_SHADERC=1)
+        target_include_directories(demos PRIVATE ${ANDROID_NDK_ROOT_PATH}/sources/third_party/shaderc/include)
+        message(STATUS "Linking Android shaderc")
+    else()
+        message(WARNING "Android shaderc not found; Vulkan shader-compilation demos will be unavailable")
+    endif()
 else()
     if("${CMAKE_SIZEOF_VOID_P}" EQUAL "8")
         set(SHADERC_DIR "linux64")
@@ -417,6 +423,12 @@ if(ANDROID)
     set(RT_JAR "$ENV{JAVA_HOME}/jre/lib/rt.jar")
     set(JAVA_BIN "$ENV{JAVA_HOME}/bin")
 
+    if(Java_VERSION VERSION_LESS 9)
+        set(JAVA_COMPILE_ARGS -source ${JAVA_TARGET} -target ${JAVA_TARGET} -bootclasspath ${RT_JAR})
+    else()
+        set(JAVA_COMPILE_ARGS --release 7)
+    endif()
+
     string(REPLACE "\\" "/" ANDROID_JAR "${ANDROID_SDK_ROOT_PATH}/platforms/${APK_TARGET_ID}/android.jar")
     if(CMAKE_HOST_WIN32)
         set(CLASS_PATH "${ANDROID_JAR}\;obj")
@@ -475,7 +487,7 @@ if(ANDROID)
     add_custom_command(OUTPUT ${APK_FILE} APPEND
                        COMMAND ${CMAKE_COMMAND} -E remove ${APK_FILE} # Don't package any existing artifact into the new one
                        COMMAND ${BUILD_TOOLS}/aapt package -f -m -S res -J src -M AndroidManifest.xml -I ${ANDROID_JAR}
-		       COMMAND ${JAVA_BIN}/javac -d ./obj -source ${JAVA_TARGET} -target ${JAVA_TARGET} -bootclasspath ${RT_JAR} -classpath "${CLASS_PATH}" -sourcepath src src/renderdoc/org/demos/*.java
+                       COMMAND ${JAVA_BIN}/javac -d ./obj ${JAVA_COMPILE_ARGS} -classpath "${CLASS_PATH}" -sourcepath src src/renderdoc/org/demos/*.java
                        COMMAND ${DEX_COMMAND}
                        COMMAND ${BUILD_TOOLS}/aapt package -f -M AndroidManifest.xml --version-code ${APK_VERSION_CODE} --version-name ${APK_VERSION_NAME} -S res -I ${ANDROID_JAR} -F demos-unaligned.apk bin libs
                        COMMAND ${BUILD_TOOLS}/zipalign -f 4 demos-unaligned.apk demos.apk
