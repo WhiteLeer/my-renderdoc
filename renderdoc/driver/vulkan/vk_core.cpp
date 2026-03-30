@@ -2686,11 +2686,7 @@ bool WrappedVulkan::Serialise_BeginCaptureFrame(SerialiserType &ser)
 void WrappedVulkan::StartFrameCapture(DeviceOwnedWindow devWnd)
 {
   if(!IsBackgroundCapturing(m_State))
-  {
-    RDCWARN("Vulkan StartFrameCapture ignored: state=%u device=%p window=%p", (uint32_t)m_State,
-            devWnd.device, devWnd.windowHandle);
     return;
-  }
 
   m_CaptureFailure = false;
 
@@ -2818,11 +2814,7 @@ void WrappedVulkan::StartFrameCapture(DeviceOwnedWindow devWnd)
 bool WrappedVulkan::EndFrameCapture(DeviceOwnedWindow devWnd)
 {
   if(!IsActiveCapturing(m_State))
-  {
-    RDCWARN("Vulkan EndFrameCapture ignored: state=%u device=%p window=%p", (uint32_t)m_State,
-            devWnd.device, devWnd.windowHandle);
     return true;
-  }
 
   if(m_CaptureFailure)
   {
@@ -3464,14 +3456,6 @@ void WrappedVulkan::AdvanceFrame()
 
 void WrappedVulkan::Present(DeviceOwnedWindow devWnd)
 {
-  static uint32_t presentLogCount = 0;
-  uint32_t presentLogIndex = presentLogCount++;
-  if(presentLogIndex < 5 || (presentLogIndex % 1000) == 0)
-  {
-    RDCLOG("Vulkan Present observed: count=%u frame=%u device=%p window=%p state=%u", presentLogIndex,
-           m_FrameCounter, devWnd.device, devWnd.windowHandle, (uint32_t)m_State);
-  }
-
   bool activeWindow = devWnd.windowHandle == NULL || RenderDoc::Inst().IsActiveWindow(devWnd);
 
   RenderDoc::Inst().AddActiveDriver(RDCDriver::Vulkan, true);
@@ -3493,22 +3477,12 @@ void WrappedVulkan::Present(DeviceOwnedWindow devWnd)
 
   bool trigger = !UseOffscreenSubmitCapture() &&
                  RenderDoc::Inst().ShouldTriggerCapture(m_FrameCounter);
-  if(trigger)
-  {
-    RDCLOG("Vulkan Present consumed capture request: frame=%u device=%p window=%p state=%u",
-           m_FrameCounter, devWnd.device, devWnd.windowHandle, (uint32_t)m_State);
-  }
-
   if(trigger && IsBackgroundCapturing(m_State))
   {
     RenderDoc::Inst().StartFrameCapture(devWnd);
 
     m_AppControlledCapture = false;
     m_CapturedFrames.back().frameNumber = m_FrameCounter;
-  }
-  else if(trigger)
-  {
-    RDCWARN("Vulkan Present could not start capture: state=%u", (uint32_t)m_State);
   }
 }
 

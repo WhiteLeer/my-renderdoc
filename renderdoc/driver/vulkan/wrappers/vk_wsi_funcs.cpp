@@ -971,12 +971,6 @@ bool WrappedVulkan::Serialise_vkQueuePresentKHR(SerialiserType &ser, VkQueue que
 
 VkResult WrappedVulkan::vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo)
 {
-  static uint32_t queuePresentLogCount = 0;
-  uint32_t queuePresentLogIndex = queuePresentLogCount++;
-  if(queuePresentLogIndex < 5 || (queuePresentLogIndex % 1000) == 0)
-    RDCLOG("vkQueuePresentKHR observed: count=%u swapchains=%u state=%u", queuePresentLogIndex,
-           pPresentInfo ? pPresentInfo->swapchainCount : 0U, (uint32_t)m_State);
-
   AdvanceFrame();
 
   if(Vulkan_Debug_VerboseCommandRecording())

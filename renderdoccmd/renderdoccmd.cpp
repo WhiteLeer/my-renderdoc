@@ -24,6 +24,7 @@
  ******************************************************************************/
 
 #include "renderdoccmd.h"
+#include "capture_variant.h"
 #include <app/renderdoc_app.h>
 #include <replay/version.h>
 #include <string>
@@ -343,7 +344,7 @@ public:
   ThumbCommand() : Command() {}
   virtual void AddOptions(cmdline::parser &parser)
   {
-    parser.set_footer("<filename.rdc>");
+    parser.set_footer("<filename.zzzrdc>");
     parser.add<std::string>("out", 'o', "The output filename to save the file to", true,
                             "filename.jpg");
     parser.add<std::string>("format", 'f',
@@ -416,7 +417,7 @@ public:
     bytebuf buf;
 
     ICaptureFile *file = RENDERDOC_OpenCaptureFile();
-    ResultDetails st = file->OpenFile(conv(infile), "rdc", NULL);
+    ResultDetails st = file->OpenFile(conv(infile), RENDERDOC_CAPTURE_FILE_EXTENSION, NULL);
     if(st.OK())
     {
       buf = file->GetThumbnail(type, maxsize).data;
@@ -535,7 +536,7 @@ public:
   ReplayCommand() : Command() {}
   virtual void AddOptions(cmdline::parser &parser)
   {
-    parser.set_footer("<capture.rdc>");
+    parser.set_footer("<capture.zzzrdc>");
     parser.add<uint32_t>("width", 'w', "The preview window width.", false, 1280);
     parser.add<uint32_t>("height", 'h', "The preview window height.", false, 720);
     parser.add<uint32_t>("loops", 'l', "How many times to loop the replay, or 0 for indefinite.",
@@ -621,7 +622,7 @@ public:
 
       ICaptureFile *file = RENDERDOC_OpenCaptureFile();
 
-      ResultDetails res = file->OpenFile(conv(filename), "rdc", NULL);
+      ResultDetails res = file->OpenFile(conv(filename), RENDERDOC_CAPTURE_FILE_EXTENSION, NULL);
 
       if(res.code != ResultCode::Succeeded)
       {
@@ -1044,7 +1045,7 @@ public:
   EmbeddedSectionCommand(bool extract) : Command() { m_Extract = extract; }
   virtual void AddOptions(cmdline::parser &parser)
   {
-    parser.set_footer("<capture.rdc>");
+    parser.set_footer("<capture.zzzrdc>");
     parser.add<std::string>("section", 's', "The embedded section name.");
     parser.add<std::string>("file", 'f',
                             m_Extract ? "The file to write the section contents to."

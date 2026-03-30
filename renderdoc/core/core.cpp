@@ -29,6 +29,7 @@
 #include "api/replay/version.h"
 #include "common/common.h"
 #include "common/threading.h"
+#include "core/capture_variant.h"
 #include "core/settings.h"
 #include "hooks/hooks.h"
 #include "jpeg-compressor/jpge.h"
@@ -1121,14 +1122,8 @@ void RenderDoc::StartFrameCapture(DeviceOwnedWindow devWnd)
   IFrameCapturer *frameCap = MatchFrameCapturer(devWnd);
   if(frameCap)
   {
-    RDCLOG("StartFrameCapture matched device=%p window=%p", devWnd.device, devWnd.windowHandle);
     frameCap->StartFrameCapture(devWnd);
     m_CapturesActive++;
-  }
-  else
-  {
-    RDCWARN("StartFrameCapture found no capturer for device=%p window=%p", devWnd.device,
-            devWnd.windowHandle);
   }
 }
 
@@ -1490,8 +1485,6 @@ void RenderDoc::QueueCapture(uint32_t frameNumber)
 bool RenderDoc::ShouldTriggerCapture(uint32_t frameNumber)
 {
   bool ret = m_Cap > 0;
-  bool queuedCapture = false;
-
   if(m_Cap > 0)
     m_Cap--;
 
@@ -1507,7 +1500,6 @@ bool RenderDoc::ShouldTriggerCapture(uint32_t frameNumber)
     {
       // we want to capture the next frame
       ret = true;
-      queuedCapture = true;
     }
     else
     {
@@ -1515,10 +1507,6 @@ bool RenderDoc::ShouldTriggerCapture(uint32_t frameNumber)
       m_QueuedFrameCaptures.push_back(*it);
     }
   }
-
-  if(ret)
-    RDCLOG("Capture request consumed at frame=%u directRemaining=%u queued=%u", frameNumber, m_Cap,
-           queuedCapture ? 1U : 0U);
 
   return ret;
 }
@@ -1685,7 +1673,8 @@ RDCFile *RenderDoc::CreateRDC(RDCDriver driver, uint32_t frameNum, const FramePi
   if(frameNum == ~0U)
     suffix = "_capture";
 
-  m_CurrentLogFile = StringFormat::Fmt("%s%s.rdc", m_CaptureFileTemplate.c_str(), suffix.c_str());
+  m_CurrentLogFile = StringFormat::Fmt("%s%s%s", m_CaptureFileTemplate.c_str(), suffix.c_str(),
+                                       RENDERDOC_CAPTURE_FILE_SUFFIX);
 
   // make sure we don't stomp another capture if we make multiple captures in the same frame.
   {
@@ -1695,8 +1684,9 @@ RDCFile *RenderDoc::CreateRDC(RDCDriver driver, uint32_t frameNum, const FramePi
             return o.path == m_CurrentLogFile;
           }) != m_Captures.end())
     {
-      m_CurrentLogFile =
-          StringFormat::Fmt("%s%s_%d.rdc", m_CaptureFileTemplate.c_str(), suffix.c_str(), altnum);
+      m_CurrentLogFile = StringFormat::Fmt("%s%s_%d%s", m_CaptureFileTemplate.c_str(),
+                                           suffix.c_str(), altnum,
+                                           RENDERDOC_CAPTURE_FILE_SUFFIX);
       altnum++;
     }
   }
@@ -1891,7 +1881,7 @@ rdcarray<CaptureFileFormat> RenderDoc::GetCaptureFileFormats()
 
   {
     CaptureFileFormat rdc;
-    rdc.extension = "rdc";
+    rdc.extension = RENDERDOC_CAPTURE_FILE_EXTENSION;
     rdc.name = "Native RDC capture file format.";
     rdc.description = "The format produced by frame-captures from applications directly.";
     rdc.openSupported = true;
@@ -2152,8 +2142,10 @@ void RenderDoc::SetCaptureFileTemplate(const rdcstr &pathtemplate)
 
   m_CaptureFileTemplate = pathtemplate;
 
-  if(m_CaptureFileTemplate.length() > 4 &&
-     m_CaptureFileTemplate.substr(m_CaptureFileTemplate.length() - 4) == ".rdc")
+  if(m_CaptureFileTemplate.endsWith(RENDERDOC_CAPTURE_FILE_SUFFIX))
+    m_CaptureFileTemplate = m_CaptureFileTemplate.substr(
+        0, m_CaptureFileTemplate.length() - strlen(RENDERDOC_CAPTURE_FILE_SUFFIX));
+  else if(m_CaptureFileTemplate.endsWith(".rdc"))
     m_CaptureFileTemplate = m_CaptureFileTemplate.substr(0, m_CaptureFileTemplate.length() - 4);
 
   FileIO::CreateParentDirectory(m_CaptureFileTemplate);
@@ -2224,6 +2216,19 @@ void RenderDoc::FinishCaptureWriting(RDCFile *rdc, uint32_t frameNumber)
 
       w->Finish();
 
+      delete w;
+    }
+
+    // Mark the capture so game-specific RenderDoc builds can reject captures
+    // produced by an incompatible variant before entering replay code.
+    {
+      SectionProperties props = {};
+      props.type = SectionType::Unknown;
+      props.name = RENDERDOC_CAPTURE_VARIANT_SECTION;
+      props.version = 1;
+      StreamWriter *w = rdc->WriteSection(props);
+      w->Write(RENDERDOC_CAPTURE_VARIANT, strlen(RENDERDOC_CAPTURE_VARIANT));
+      w->Finish();
       delete w;
     }
 
