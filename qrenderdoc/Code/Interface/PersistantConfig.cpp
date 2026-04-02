@@ -24,7 +24,9 @@
 
 #include <QApplication>
 #include <QDebug>
+#include <QFile>
 #include <QDir>
+#include <QDateTime>
 #include <QMutexLocker>
 #include <QStandardPaths>
 #include "Code/QRDUtils.h"
@@ -397,6 +399,9 @@ void PersistantConfig::UpdateEnumeratedProtocolDevices()
   for(const rdcstr &p : protocols)
   {
     IDeviceProtocolController *protocol = RENDERDOC_GetDeviceProtocolController(p);
+
+    if(protocol == NULL)
+      continue;
 
     rdcarray<rdcstr> devices = protocol->GetDevices();
 
