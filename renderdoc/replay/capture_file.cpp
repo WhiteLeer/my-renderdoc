@@ -23,6 +23,7 @@
  ******************************************************************************/
 
 #include "core/core.h"
+#include "core/capture_variant.h"
 #include "jpeg-compressor/jpgd.h"
 #include "jpeg-compressor/jpge.h"
 #include "replay/replay_controller.h"
@@ -222,7 +223,7 @@ ResultDetails CaptureFile::OpenFile(const rdcstr &filename, const rdcstr &filety
   }
   else
   {
-    if(filetype != "" && filetype != "rdc")
+    if(filetype != "" && filetype != RENDERDOC_CAPTURE_FILE_EXTENSION)
       RDCWARN("Opening file with unrecognised filetype '%s' - treating as 'rdc'", filetype.c_str());
 
     if(progress)
@@ -263,7 +264,7 @@ ResultDetails CaptureFile::OpenBuffer(const bytebuf &buffer, const rdcstr &filet
   }
   else
   {
-    if(filetype != "" && filetype != "rdc")
+    if(filetype != "" && filetype != RENDERDOC_CAPTURE_FILE_EXTENSION)
       RDCWARN("Opening file with unrecognised filetype '%s' - treating as 'rdc'", filetype.c_str());
 
     if(progress)
@@ -283,7 +284,13 @@ ResultDetails CaptureFile::OpenBuffer(const bytebuf &buffer, const rdcstr &filet
 ResultDetails CaptureFile::CopyFileTo(const rdcstr &filename)
 {
   if(m_RDC)
+  {
+    if(filename.endsWith(RENDERDOC_CAPTURE_FILE_SUFFIX) &&
+       m_RDC->SectionIndex(RENDERDOC_CAPTURE_VARIANT_SECTION) < 0)
+      return Convert(filename, RENDERDOC_CAPTURE_FILE_EXTENSION, NULL, NULL);
+
     return m_RDC->CopyFileTo(filename);
+  }
 
   return RDResult(ResultCode::InternalError, "RDC file unexpectedly NULL");
 }
@@ -461,7 +468,7 @@ ResultDetails CaptureFile::Convert(const rdcstr &filename, const rdcstr &filetyp
     }
   }
 
-  if(filetype != "" && filetype != "rdc")
+  if(filetype != "" && filetype != RENDERDOC_CAPTURE_FILE_EXTENSION)
     RDCWARN("Converting file to unrecognised filetype '%s' - treating as 'rdc'", filetype.c_str());
 
   RDCFile output;
@@ -556,6 +563,22 @@ ResultDetails CaptureFile::Convert(const rdcstr &filename, const rdcstr &filetyp
     delete reader;
     delete writer;
 
+    if(ret != ResultCode::Succeeded)
+      return ret;
+  }
+
+  if(m_RDC->SectionIndex(RENDERDOC_CAPTURE_VARIANT_SECTION) < 0)
+  {
+    SectionProperties props = {};
+    props.type = SectionType::Unknown;
+    props.name = RENDERDOC_CAPTURE_VARIANT_SECTION;
+    props.version = 1;
+    StreamWriter *writer = output.WriteSection(props);
+    writer->Write(RENDERDOC_CAPTURE_VARIANT, strlen(RENDERDOC_CAPTURE_VARIANT));
+    writer->Finish();
+
+    RDResult ret = writer->GetError();
+    delete writer;
     if(ret != ResultCode::Succeeded)
       return ret;
   }

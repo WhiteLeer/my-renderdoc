@@ -27,6 +27,7 @@
 #include "api/replay/renderdoc_replay.h"
 #include "common/threading.h"
 #include "core/core.h"
+#include "core/capture_variant.h"
 #include "jpeg-compressor/jpgd.h"
 #include "os/os_specific.h"
 #include "replay/replay_driver.h"
@@ -232,7 +233,7 @@ void RenderDoc::TargetControlClientThread(uint32_t version, Network::Socket *cli
       bytebuf buf;
 
       ICaptureFile *file = RENDERDOC_OpenCaptureFile();
-      if(file->OpenFile(captures.back().path, "rdc", NULL).OK())
+      if(file->OpenFile(captures.back().path, RENDERDOC_CAPTURE_FILE_EXTENSION, NULL).OK())
       {
         buf = file->GetThumbnail(FileType::JPG, 0).data;
       }

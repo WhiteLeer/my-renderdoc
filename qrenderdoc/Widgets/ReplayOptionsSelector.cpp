@@ -25,6 +25,7 @@
 #include "ReplayOptionsSelector.h"
 #include <QKeyEvent>
 #include "Code/QRDUtils.h"
+#include "capture_variant.h"
 #include "ui_ReplayOptionsSelector.h"
 
 ReplayOptionsSelector::ReplayOptionsSelector(ICaptureContext &ctx, bool actions, QWidget *parent)
@@ -201,7 +202,8 @@ void ReplayOptionsSelector::on_captureFileBrowse_clicked()
   }
 
   QString filename = RDDialog::getOpenFileName(this, tr("Select capture to open"), initDir,
-                                               tr("Capture Files (*.rdc);;All Files (*)"));
+                                               tr("Capture Files (*.%1);;All Files (*)")
+                                                   .arg(lit(RENDERDOC_CAPTURE_FILE_EXTENSION)));
 
   if(!filename.isEmpty())
     ui->captureFile->setCurrentText(filename);
