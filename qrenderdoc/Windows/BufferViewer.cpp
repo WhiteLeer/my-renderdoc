@@ -3279,6 +3279,15 @@ void BufferViewer::OnCaptureLoaded()
   if(!m_MeshView)
     return;
 
+  // Avoid creating a Vulkan mesh preview output on the affected Intel driver.
+  // Buffer inspection remains available without the preview renderer.
+  if(m_Ctx.APIProps().pipelineType == GraphicsAPI::Vulkan)
+  {
+    ui->render->SetOutput(NULL);
+    ui->render->hide();
+    return;
+  }
+
   WindowingData winData = ui->render->GetWidgetWindowingData();
 
   m_Ctx.Replay().BlockInvoke([winData, this](IReplayController *r) {
@@ -3317,6 +3326,12 @@ void BufferViewer::FillScrolls(PopulateBufferData *bufdata)
 
 void BufferViewer::OnEventChanged(uint32_t eventId)
 {
+  // The current Intel Vulkan driver can reset the GPU when the mesh analysis
+  // path fetches post-vertex-shader data while browsing events. Keep the
+  // buffer/mesh panel available, but avoid refreshing it on Vulkan events.
+  if(m_Ctx.APIProps().pipelineType == GraphicsAPI::Vulkan)
+    return;
+
   PopulateBufferData *bufdata = new PopulateBufferData;
 
   m_Sequence++;

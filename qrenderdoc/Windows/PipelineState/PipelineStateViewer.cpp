@@ -25,7 +25,9 @@
 #include "PipelineStateViewer.h"
 #include <QMenu>
 #include <QMouseEvent>
+#include <QImage>
 #include <QPainter>
+#include <QPointer>
 #include <QScrollBar>
 #include <QStylePainter>
 #include <QSvgRenderer>
@@ -82,7 +84,7 @@ static uint32_t byteSize(const ResourceFormat &fmt)
   return fmt.compByteWidth * fmt.compCount;
 }
 
-RDPreviewTooltip::RDPreviewTooltip(PipelineStateViewer *parent, CustomPaintWidget *thumbnail,
+RDPreviewTooltip::RDPreviewTooltip(PipelineStateViewer *parent, QWidget *thumbnail,
                                    ICaptureContext &ctx)
     : QFrame(parent), m_Ctx(ctx)
 {
@@ -185,10 +187,20 @@ PipelineStateViewer::PipelineStateViewer(ICaptureContext &ctx, QWidget *parent)
 {
   ui->setupUi(this);
 
-  ui->thumbnail->SetContext(m_Ctx);
   ui->layout->removeWidget(ui->thumbnail);
 
-  m_Tooltip = new RDPreviewTooltip(this, ui->thumbnail, m_Ctx);
+  // The old preview used a real Vulkan output window embedded in the tooltip.
+  // Use a normal Qt image widget instead; the replay side is populated through
+  // DrawThumbnail(), which renders to a headless target and reads back pixels.
+  delete ui->thumbnail;
+  ui->thumbnail = NULL;
+
+  m_Thumbnail = new QLabel();
+  m_Thumbnail->setAlignment(Qt::AlignCenter);
+  m_Thumbnail->setScaledContents(true);
+  m_Thumbnail->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+
+  m_Tooltip = new RDPreviewTooltip(this, m_Thumbnail, m_Ctx);
 
   QColor c = palette().color(QPalette::ToolTipBase).toRgb();
 
@@ -213,6 +225,7 @@ PipelineStateViewer::PipelineStateViewer(ICaptureContext &ctx, QWidget *parent)
 
 PipelineStateViewer::~PipelineStateViewer()
 {
+  ShutdownThumbnailOutput();
   reset();
 
   m_Ctx.BuiltinWindowClosed(this);
@@ -237,16 +250,17 @@ void PipelineStateViewer::OnCaptureLoaded()
   if(m_Current)
     m_Current->OnCaptureLoaded();
 
-  if(!m_Ctx.APIProps().remoteReplay)
+  // Allow an environment override for diagnosing thumbnail failures without
+  // changing the normal viewer path.
+  const bool disablePipelineThumbnail =
+      qEnvironmentVariableIntValue("RENDERDOC_DISABLE_PIPELINE_THUMBNAIL") != 0;
+
+  if(!m_Ctx.APIProps().remoteReplay && !disablePipelineThumbnail)
   {
-    WindowingData thumbData = ui->thumbnail->GetWidgetWindowingData();
-
-    m_Ctx.Replay().BlockInvoke([thumbData, this](IReplayController *r) {
-      m_Output = r->CreateOutput(thumbData, ReplayOutputType::Texture);
-
-      ui->thumbnail->SetOutput(m_Output);
-
-      RT_UpdateAndDisplay(r);
+    m_Ctx.Replay().BlockInvoke([this](IReplayController *r) {
+      // This output is only a replay-side owner for DrawThumbnail(). No native
+      // window or presentation surface is created for the tooltip preview.
+      m_Output = r->CreateOutput(CreateHeadlessWindowingData(1, 1), ReplayOutputType::Texture);
     });
   }
   else
@@ -255,18 +269,78 @@ void PipelineStateViewer::OnCaptureLoaded()
   }
 }
 
-void PipelineStateViewer::RT_UpdateAndDisplay(IReplayController *r)
+void PipelineStateViewer::RequestThumbnail()
 {
-  if(m_Output != NULL)
-  {
-    m_Output->SetTextureDisplay(m_TexDisplay);
+  if(m_Thumbnail == NULL || m_TexDisplay.resourceId == ResourceId())
+    return;
 
-    GUIInvoke::call(this, [this]() { ui->thumbnail->update(); });
+  const QSize size = m_ThumbnailSize;
+  const ResourceId id = m_TexDisplay.resourceId;
+  const Subresource subresource = m_TexDisplay.subresource;
+  const CompType typeCast = m_TexDisplay.typeCast;
+  const uint64_t generation = ++m_ThumbnailGeneration;
+  QPointer<PipelineStateViewer> me(this);
+
+  m_Ctx.Replay().AsyncInvoke(lit("pipelineThumbnail"),
+                             [me, size, id, subresource, typeCast, generation](IReplayController *r) {
+                               if(me)
+                                 me->RT_UpdateAndDisplay(r, size, id, subresource, typeCast,
+                                                         generation);
+                             });
+}
+
+void PipelineStateViewer::RT_UpdateAndDisplay(IReplayController *r, QSize size, ResourceId id,
+                                              Subresource subresource, CompType typeCast,
+                                              uint64_t generation)
+{
+  if(m_Output == NULL && r != NULL)
+    m_Output = r->CreateOutput(CreateHeadlessWindowingData(1, 1), ReplayOutputType::Texture);
+
+  if(m_Output != NULL && size.width() > 0 && size.height() > 0 && id != ResourceId())
+  {
+    bytebuf pixels = m_Output->DrawThumbnail(size.width(), size.height(), id, subresource, typeCast);
+
+    bytebuf *copy = new bytebuf;
+    copy->swap(pixels);
+
+    QPointer<PipelineStateViewer> me(this);
+    GUIInvoke::call(this, [me, size, generation, copy]() {
+      if(me && me->m_Thumbnail && generation == me->m_ThumbnailGeneration && !copy->empty())
+      {
+        QImage image(copy->data(), size.width(), size.height(), size.width() * 3,
+                     QImage::Format_RGB888);
+        me->m_Thumbnail->setPixmap(QPixmap::fromImage(image));
+      }
+
+      delete copy;
+    });
   }
+}
+
+void PipelineStateViewer::ShutdownThumbnailOutput()
+{
+  if(m_Output == NULL)
+    return;
+
+  IReplayOutput *output = m_Output;
+  m_Output = NULL;
+  ++m_ThumbnailGeneration;
+
+  m_Ctx.Replay().BlockInvoke([output](IReplayController *) { output->Shutdown(); });
 }
 
 void PipelineStateViewer::OnCaptureClosed()
 {
+  ShutdownThumbnailOutput();
+
+  ++m_ThumbnailGeneration;
+  m_TexDisplay.resourceId = ResourceId();
+  if(m_Thumbnail)
+  {
+    m_Thumbnail->clear();
+    m_Thumbnail->hide();
+  }
+
   if(m_Current)
     m_Current->OnCaptureClosed();
 }
@@ -286,6 +360,12 @@ void PipelineStateViewer::OnEventChanged(uint32_t eventId)
 
   if(m_Current)
     m_Current->OnEventChanged(eventId);
+
+  // If a tooltip is currently visible, refresh its image for the new replay
+  // event. The request uses a generation number so an older readback cannot
+  // overwrite a newer hovered resource.
+  if(m_Thumbnail && m_Thumbnail->isVisible() && m_TexDisplay.resourceId != ResourceId())
+    RequestThumbnail();
 }
 
 QString PipelineStateViewer::GetCurrentAPI()
@@ -1203,9 +1283,6 @@ ResourceId PipelineStateViewer::updateThumbnail(QWidget *widget, QModelIndex idx
 {
   ResourceId id;
 
-  if(!m_Output)
-    return id;
-
   RDTreeWidget *treeWidget = qobject_cast<RDTreeWidget *>(widget);
   if(treeWidget)
   {
@@ -1228,18 +1305,24 @@ ResourceId PipelineStateViewer::updateThumbnail(QWidget *widget, QModelIndex idx
     if(tex)
     {
       m_TexDisplay.resourceId = id;
-      INVOKE_MEMFN(RT_UpdateAndDisplay);
 
       float aspect = (float)tex->width / (float)qMax(1U, tex->height);
 
       // keep height fixed at 100, and make width match the aspect ratio of the texture - up to 21:9
       // ratio
-      ui->thumbnail->setFixedSize((int)qBound(100.0f, aspect * 100.0f, (21.0f / 9.0f) * 100.0f), 100);
-      ui->thumbnail->show();
+      m_ThumbnailSize = QSize(
+          (int)qBound(100.0f, aspect * 100.0f, (21.0f / 9.0f) * 100.0f), 100);
+      m_Thumbnail->setFixedSize(m_ThumbnailSize);
+      m_Thumbnail->clear();
+      m_Thumbnail->show();
+      RequestThumbnail();
     }
     else
     {
-      ui->thumbnail->hide();
+      ++m_ThumbnailGeneration;
+      m_TexDisplay.resourceId = ResourceId();
+      m_Thumbnail->clear();
+      m_Thumbnail->hide();
     }
   }
 
@@ -1248,9 +1331,6 @@ ResourceId PipelineStateViewer::updateThumbnail(QWidget *widget, QModelIndex idx
 
 bool PipelineStateViewer::hasThumbnail(QWidget *widget, QModelIndex idx)
 {
-  if(!m_Output)
-    return false;
-
   RDTreeWidget *treeWidget = qobject_cast<RDTreeWidget *>(widget);
   if(treeWidget)
   {
