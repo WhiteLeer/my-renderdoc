@@ -41,7 +41,6 @@ class QMenu;
 class RDLabel;
 class RDTreeWidgetItem;
 class RDTreeWidget;
-class CustomPaintWidget;
 
 class D3D11PipelineStateViewer;
 class D3D12PipelineStateViewer;
@@ -70,7 +69,7 @@ private:
   ICaptureContext &m_Ctx;
 
 public:
-  explicit RDPreviewTooltip(PipelineStateViewer *parent, CustomPaintWidget *thumbnail,
+  explicit RDPreviewTooltip(PipelineStateViewer *parent, QWidget *thumbnail,
                             ICaptureContext &ctx);
 
   void hideTip();
@@ -144,10 +143,17 @@ private:
 
   RDPreviewTooltip *m_Tooltip = NULL;
 
+  QLabel *m_Thumbnail = NULL;
+
   TextureDisplay m_TexDisplay;
   IReplayOutput *m_Output = NULL;
+  QSize m_ThumbnailSize;
+  uint64_t m_ThumbnailGeneration = 0;
 
-  void RT_UpdateAndDisplay(IReplayController *r);
+  void RequestThumbnail();
+  void RT_UpdateAndDisplay(IReplayController *, QSize size, ResourceId id,
+                           Subresource subresource, CompType typeCast, uint64_t generation);
+  void ShutdownThumbnailOutput();
 
   void AddResourceUsageEntry(QMenu &menu, uint32_t start, uint32_t end, ResourceUsage usage);
   void ShowResourceContextMenu(RDTreeWidget *widget, const QPoint &pos, ResourceId id,

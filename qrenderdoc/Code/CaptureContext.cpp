@@ -128,13 +128,21 @@ CaptureContext::CaptureContext(PersistantConfig &cfg) : m_Config(cfg)
       }
       else if(err.code == ResultCode::DeviceLost)
       {
-        title = tr("Device Lost error");
-        text = tr("%1.\n\n"
-                  "This may be due to an application bug, a RenderDoc bug, or insufficient "
-                  "resources on the system to analyse the capture.\n\n"
-                  "It is recommended that you run your application with API validation enabled, as "
-                  "API usage errors can cause this kind of problem.")
-                   .arg(err.Message());
+        title = tr("GPU 设备丢失");
+        text = tr("回放捕获时发生 Vulkan 设备丢失。\n\n"
+                  "错误信息：%1\n"
+                  "捕获文件：%2\n"
+                  "当前事件：%3\n\n"
+                  "这通常表示显卡驱动或 GPU 在回放过程中发生超时或重置，也可能由捕获兼容性、"
+                  "RenderDoc 回放问题或系统资源不足引起。\n\n"
+                  "建议：\n"
+                  "1. 关闭当前捕获后重新加载；\n"
+                  "2. 更新或回退显卡驱动；\n"
+                  "3. 尝试降低回放负载，或更换其他 GPU 测试；\n"
+                  "4. 保留上述信息、RenderDoc 日志和捕获文件以便进一步定位。")
+                   .arg(err.Message())
+                   .arg(m_CaptureFile)
+                   .arg(m_EventID);
       }
       else if(err.code == ResultCode::OutOfMemory)
       {
@@ -153,10 +161,17 @@ CaptureContext::CaptureContext(PersistantConfig &cfg) : m_Config(cfg)
                    .arg(err.Message());
       }
 
-      text +=
-          tr("\n\n"
-             "This error is not recoverable and the analysis cannot continue. The UI will be "
-             "non-functional until the capture is closed and reloaded.\n\n");
+      if(err.code == ResultCode::DeviceLost)
+      {
+        text += tr("\n\n当前回放无法恢复。请关闭并重新加载捕获后再继续分析。\n\n");
+      }
+      else
+      {
+        text +=
+            tr("\n\n"
+               "This error is not recoverable and the analysis cannot continue. The UI will be "
+               "non-functional until the capture is closed and reloaded.\n\n");
+      }
 
       bool add_report = false;
 

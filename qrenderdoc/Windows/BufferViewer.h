@@ -359,6 +359,7 @@ private:
   void stageRowMenu(MeshDataStage stage, QMenu *menu, const QPoint &pos);
   void meshHeaderMenu(MeshDataStage stage, const QPoint &pos);
 
+  void ShutdownOutput();
   void Reset();
 
   void ClearModels();
