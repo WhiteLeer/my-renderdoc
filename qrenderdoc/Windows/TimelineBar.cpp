@@ -32,6 +32,17 @@
 #include "Code/QRDUtils.h"
 #include "Code/Resources.h"
 
+namespace
+{
+const QColor timelinePanelColor(QStringLiteral("#1b232e"));
+const QColor timelineSurfaceColor(QStringLiteral("#202a36"));
+const QColor timelineBorderColor(QStringLiteral("#3a4758"));
+const QColor timelineLineColor(QStringLiteral("#435265"));
+const QColor timelineTextColor(QStringLiteral("#e7eef7"));
+const QColor timelineSelectedColor(QStringLiteral("#315b86"));
+const QColor timelineHoverColor(QStringLiteral("#354a62"));
+}
+
 QPointF aliasAlign(QPointF pt)
 {
   pt.setX(int(pt.x()) + 0.5);
@@ -115,10 +126,29 @@ TimelineBar::TimelineBar(ICaptureContext &ctx, QWidget *parent)
 
   setMouseTracking(true);
 
+  setObjectName(QStringLiteral("timelineBar"));
+  setAttribute(Qt::WA_StyledBackground, true);
+  viewport()->setObjectName(QStringLiteral("timelineViewport"));
+  viewport()->setAttribute(Qt::WA_StyledBackground, true);
+
   setFrameShape(NoFrame);
 
   setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+
+  horizontalScrollBar()->setObjectName(QStringLiteral("timelineHorizontalScrollBar"));
+  setStyleSheet(QStringLiteral(
+      "QAbstractScrollArea#timelineBar { background: #1b232e; border: none; }"
+      "QWidget#timelineViewport { background: #1b232e; border: none; }"
+      "QScrollBar#timelineHorizontalScrollBar { background: #202a36; border: none; height: 12px;"
+      " margin: 0px 4px 3px 4px; }"
+      "QScrollBar#timelineHorizontalScrollBar::handle:horizontal { background: #43566c;"
+      " border-radius: 4px; min-width: 28px; margin: 2px 0px; }"
+      "QScrollBar#timelineHorizontalScrollBar::handle:horizontal:hover { background: #5e8dbb; }"
+      "QScrollBar#timelineHorizontalScrollBar::add-line:horizontal,"
+      "QScrollBar#timelineHorizontalScrollBar::sub-line:horizontal { width: 0px; }"
+      "QScrollBar#timelineHorizontalScrollBar::add-page:horizontal,"
+      "QScrollBar#timelineHorizontalScrollBar::sub-page:horizontal { background: #202a36; }"));
 
   QObject::connect(horizontalScrollBar(), &QScrollBar::valueChanged,
                    [this](int value) { m_pan = -value; });
@@ -467,19 +497,16 @@ void TimelineBar::paintEvent(QPaintEvent *e)
   {
     QRectF r = viewport()->rect();
 
-    p.fillRect(r, palette().brush(QPalette::Window));
+    QPainterPath outerPath;
+    outerPath.addRoundedRect(r.adjusted(0, 0, -1, -1), 8, 8);
+    p.fillPath(outerPath, timelinePanelColor);
+    p.setPen(QPen(timelineBorderColor, 1.0));
+    p.drawPath(outerPath);
 
     QRectF borderRect = r.marginsRemoved(uniformMargins(margin));
     r = borderRect.marginsRemoved(uniformMargins(borderWidth));
 
-    p.fillRect(r, palette().brush(QPalette::Base));
-
-    QStyleOptionFrame frameOpt;
-    frameOpt.initFrom(viewport());
-    frameOpt.rect = borderRect.toRect();
-    frameOpt.frameShape = QFrame::Box;
-    frameOpt.lineWidth = 1;
-    p.drawControl(QStyle::CE_ShapedFrame, frameOpt);
+    p.fillRect(r, timelineSurfaceColor);
   }
 
   QTextOption to;
@@ -492,7 +519,7 @@ void TimelineBar::paintEvent(QPaintEvent *e)
     titleRect.setLeft(titleRect.left() - m_titleWidth);
     titleRect.setWidth(m_titleWidth);
 
-    p.setPen(QPen(palette().brush(QPalette::Text), 1.0));
+    p.setPen(QPen(timelineTextColor, 1.0));
 
     // add an extra margin for the text
     p.drawText(titleRect.marginsRemoved(QMarginsF(margin, 0, 0, 0)), eidAxisTitle, to);
@@ -542,12 +569,7 @@ void TimelineBar::paintEvent(QPaintEvent *e)
       // recentre
       hoverRect.moveLeft(hoverRect.left() - m_eidAxisLabelWidth / 2 + m_eidWidth / 2);
 
-      QColor backCol = palette().color(QPalette::Base);
-
-      if(getLuminance(backCol) < 0.2f)
-        backCol = backCol.lighter(120);
-      else
-        backCol = backCol.darker(120);
+      QColor backCol = timelineHoverColor;
 
       QRectF backRect = hoverRect.marginsAdded(QMargins(0, margin - borderWidth, 0, 0));
 
@@ -633,7 +655,7 @@ void TimelineBar::paintEvent(QPaintEvent *e)
     // re-add the top margin so the lines match up with the border around the EID axis
     QRectF currentBackRect = currentRect.marginsAdded(QMargins(0, margin, 0, 0));
 
-    p.fillRect(currentBackRect, palette().brush(QPalette::Base));
+    p.fillRect(currentBackRect, timelineSurfaceColor);
     drawLine(p, currentBackRect.topLeft(), currentBackRect.bottomLeft());
     drawLine(p, currentBackRect.topRight(), currentBackRect.bottomRight());
 
@@ -945,11 +967,11 @@ void TimelineBar::paintMarkers(QPainter &p, const QVector<Marker> &markers,
     if(r.contains(m_lastPos))
       backColor.setAlpha(150);
 
-    p.setPen(QPen(palette().brush(QPalette::Text), 1.0));
+    p.setPen(QPen(timelineTextColor, 1.0));
     p.fillRect(r, QBrush(backColor));
     p.drawRect(r);
 
-    p.setPen(QPen(QBrush(contrastingColor(backColor, palette().color(QPalette::Text))), 1.0));
+    p.setPen(QPen(QBrush(contrastingColor(backColor, timelineTextColor)), 1.0));
 
     r.setLeft(r.left() + margin);
 
@@ -999,8 +1021,8 @@ void TimelineBar::paintMarkers(QPainter &p, const QVector<Marker> &markers,
     QPainterPath path;
     path.addRoundedRect(r, 5, 5);
 
-    p.setPen(QPen(palette().brush(QPalette::Text), 1.0));
-    p.fillPath(path, a == m_Ctx.CurEvent() ? Qt::green : Qt::blue);
+    p.setPen(QPen(timelineTextColor, 1.0));
+    p.fillPath(path, a == m_Ctx.CurEvent() ? timelineSelectedColor : timelineBorderColor);
     p.drawPath(path);
   }
 

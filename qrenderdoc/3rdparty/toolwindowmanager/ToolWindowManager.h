@@ -249,6 +249,7 @@ public:
   static void closeToolWindow(QWidget *toolWindow);
   static void raiseToolWindow(QWidget *toolWindow);
 
+
   /*!
    * Force close a window, to be used when a toolWindow has become orphaned
    * (no valid parent)

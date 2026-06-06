@@ -33,6 +33,8 @@ class ThumbnailStrip;
 
 class ResourcePreview;
 class QBoxLayout;
+class QLabel;
+class QToolButton;
 
 class ThumbnailStrip : public QWidget
 {
@@ -44,12 +46,15 @@ public:
 
   void addThumb(ResourcePreview *prev);
 
+  void setPanelTitle(const QString &title);
+
   void clearThumbs();
   const QVector<ResourcePreview *> &thumbs() { return m_Thumbnails; }
   void refreshLayout();
 
 signals:
   void mouseClick(QMouseEvent *event);
+  void closeRequested();
 
 private:
   void resizeEvent(QResizeEvent *event) override;
@@ -59,6 +64,9 @@ private:
   QVector<ResourcePreview *> m_Thumbnails;
 
   QBoxLayout *layout;
+
+  QLabel *m_TitleLabel = NULL;
+  QToolButton *m_CloseButton = NULL;
 
   Ui::ThumbnailStrip *ui;
 };

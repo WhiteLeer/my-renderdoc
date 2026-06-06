@@ -29,20 +29,32 @@
 #include <QColorDialog>
 #include <QFileSystemWatcher>
 #include <QFontDatabase>
+#include <QIcon>
 #include <QItemDelegate>
 #include <QJsonDocument>
 #include <QMenu>
 #include <QPainter>
 #include <QPointer>
+#include <QSignalBlocker>
+#include <QSplitter>
+#include <QStyle>
 #include <QStyledItemDelegate>
+#if defined(RENDERDOC_QML_UI)
+#include <QQmlContext>
+#include <QQuickImageProvider>
+#include <QQuickWidget>
+#include <QQuickWindow>
+#endif
 #include "Code/QRDUtils.h"
 #include "Code/Resources.h"
 #include "Dialogs/TextureSaveDialog.h"
 #include "Widgets/Extended/RDHeaderView.h"
 #include "Widgets/ResourcePreview.h"
+#include "Widgets/PanelCloseIcon.h"
 #include "Widgets/TextureGoto.h"
 #include "flowlayout/FlowLayout.h"
 #include "toolwindowmanager/ToolWindowManagerArea.h"
+#include "toolwindowmanager/ToolWindowManagerWrapper.h"
 #include "ui_TextureViewer.h"
 
 float area(const QSizeF &s)
@@ -54,6 +66,22 @@ float aspect(const QSizeF &s)
 {
   return s.width() / s.height();
 }
+
+#if defined(RENDERDOC_QML_UI)
+class PanelCloseImageProvider : public QQuickImageProvider
+{
+public:
+  PanelCloseImageProvider() : QQuickImageProvider(QQuickImageProvider::Image) {}
+
+  QImage requestImage(const QString &, QSize *size, const QSize &) override
+  {
+    QImage result = PanelCloseIcon::image();
+    if(size)
+      *size = result.size();
+    return result;
+  }
+};
+#endif
 
 // if changing these functions, consider running the 'exhaustive test' at the bottom of this file
 // once
@@ -476,6 +504,20 @@ TextureViewer::TextureViewer(ICaptureContext &ctx, QWidget *parent)
 {
   ui->setupUi(this);
 
+  // Keep the render viewport vertically scrollable only. The horizontal scrollbar
+  // was taking a full extra row below the image and made the left panel look clipped.
+  ui->gridLayout->removeWidget(ui->renderHScroll);
+  ui->renderHScroll->hide();
+  ui->gridLayout->setRowMinimumHeight(2, 0);
+  ui->renderVScroll->setStyleSheet(QStringLiteral(
+      "QScrollBar#renderVScroll { background: #202a36; border: none; width: 18px; margin: 0px; }"
+      "QScrollBar#renderVScroll::handle:vertical { background: #43566c; border-radius: 3px;"
+      " min-height: 18px; margin: 2px; }"
+      "QScrollBar#renderVScroll::add-line:vertical, QScrollBar#renderVScroll::sub-line:vertical {"
+      " height: 0px; }"
+      "QScrollBar#renderVScroll::add-page:vertical, QScrollBar#renderVScroll::sub-page:vertical {"
+      " background: #202a36; }"));
+
   ui->render->SetContext(m_Ctx);
   ui->pixelContext->SetContext(m_Ctx);
 
@@ -549,10 +591,17 @@ TextureViewer::TextureViewer(ICaptureContext &ctx, QWidget *parent)
   QWidget *renderContainer = ui->renderContainer;
 
   ui->dockarea->addToolWindow(ui->renderContainer, ToolWindowManager::EmptySpace);
-  ui->dockarea->setToolWindowProperties(
-      renderContainer, ToolWindowManager::DisallowUserDocking | ToolWindowManager::HideCloseButton |
-                           ToolWindowManager::DisableDraggableTab |
-                           ToolWindowManager::AlwaysDisplayFullTabs);
+  // Let a single Current Output use the manager's minimal title bar. The previous
+  // AlwaysDisplayFullTabs flag forced a native full-tab corner to remain visible
+  // above the rounded output panel. Once locked output tabs are added, the manager
+  // automatically switches this area back to the full tab bar.
+  ui->dockarea->setToolWindowProperties(renderContainer, ToolWindowManager::HideCloseButton);
+
+  ui->dockarea->addToolWindow(
+      ui->pixelContextLayout,
+      ToolWindowManager::AreaReference(ToolWindowManager::BottomOf,
+                                       ui->dockarea->areaOf(renderContainer), 0.28f));
+  ui->dockarea->setToolWindowProperties(ui->pixelContextLayout, ToolWindowManager::HideOnClose);
 
   ui->dockarea->addToolWindow(
       ui->textureListFrame,
@@ -561,30 +610,220 @@ TextureViewer::TextureViewer(ICaptureContext &ctx, QWidget *parent)
   ui->dockarea->setToolWindowProperties(ui->textureListFrame, ToolWindowManager::HideOnClose);
 
   ui->dockarea->addToolWindow(ui->inputThumbs, ToolWindowManager::AreaReference(
-                                                   ToolWindowManager::RightOf,
+                                                   ToolWindowManager::RightWindowSide,
                                                    ui->dockarea->areaOf(renderContainer), 0.25f));
-  ui->dockarea->setToolWindowProperties(ui->inputThumbs, ToolWindowManager::HideCloseButton);
+  ui->dockarea->setToolWindowProperties(ui->inputThumbs, ToolWindowManager::HideOnClose);
 
   ui->dockarea->addToolWindow(
-      ui->outputThumbs, ToolWindowManager::AreaReference(ToolWindowManager::AddTo,
-                                                         ui->dockarea->areaOf(ui->inputThumbs)));
-  ui->dockarea->setToolWindowProperties(ui->outputThumbs, ToolWindowManager::HideCloseButton);
-
-  ui->dockarea->addToolWindow(
-      ui->pixelContextLayout,
+      ui->outputThumbs,
       ToolWindowManager::AreaReference(ToolWindowManager::BottomOf,
-                                       ui->dockarea->areaOf(ui->outputThumbs), 0.25f));
-  ui->dockarea->setToolWindowProperties(ui->pixelContextLayout, ToolWindowManager::HideCloseButton);
+                                       ui->dockarea->areaOf(ui->inputThumbs), 0.25f));
+  ui->dockarea->setToolWindowProperties(ui->outputThumbs, ToolWindowManager::HideOnClose);
 
-  ui->dockarea->setAllowFloatingWindow(false);
+  ui->dockarea->setAllowFloatingWindow(true);
 
   renderContainer->setWindowTitle(tr("Unbound"));
   ui->pixelContextLayout->setWindowTitle(tr("Pixel Context"));
+  ui->pixelContextTitle->setText(tr("Pixel Context"));
   ui->outputThumbs->setWindowTitle(tr("Outputs"));
   ui->inputThumbs->setWindowTitle(tr("Inputs"));
   ui->textureListFrame->setWindowTitle(tr("Texture List"));
 
+  ui->pixelContextLayout->setAttribute(Qt::WA_StyledBackground, true);
+  ui->pixelContextLayout->setStyleSheet(QStringLiteral(
+      "QWidget#pixelContextLayout { background: #1b232e; border: 1px solid #3a4758;"
+      " border-radius: 8px; }"
+      "QFrame#pixelContextHeader { background: #202a36; border: none;"
+      " border-top-left-radius: 7px; border-top-right-radius: 7px; }"
+      "QLabel#pixelContextTitle { color: #e7eef7; background: transparent;"
+      " font-size: 11px; font-weight: 600; }"
+      "QToolButton#pixelContextClose { color: #e7eef7; background: transparent; border: none;"
+      " border-radius: 13px; padding: 0px; font-size: 18px; font-weight: 500; }"
+      "QToolButton#pixelContextClose:hover { background: #354a62; }"
+      "QToolButton#pixelContextClose:pressed { background: #4777a5; }"
+      "QPushButton#pixelHistory, QPushButton#debugPixelContext { color: #e7eef7;"
+      " background: #293748; border: 1px solid #435265; border-radius: 7px;"
+      " padding: 4px 10px; min-height: 26px; }"
+      "QPushButton#pixelHistory:hover, QPushButton#debugPixelContext:hover {"
+      " background: #354a62; border-color: #5e8dbb; }"
+      "QPushButton#pixelHistory:pressed, QPushButton#debugPixelContext:pressed {"
+      " background: #4777a5; }"
+      "QPushButton#pixelHistory:disabled, QPushButton#debugPixelContext:disabled {"
+      " color: #718094; background: #202a36; border-color: #354252; }"
+      "CustomPaintWidget#pixelContext { background: transparent; border: none; }"));
+
+  ui->pixelContextHeader->setFixedHeight(32);
+  ui->pixelcontextgrid->setContentsMargins(8, 6, 8, 8);
+  ui->pixelcontextgrid->setHorizontalSpacing(8);
+  ui->pixelcontextgrid->setVerticalSpacing(6);
+  ui->pixelcontextgrid->removeWidget(ui->pixelHistory);
+  ui->pixelcontextgrid->removeWidget(ui->debugPixelContext);
+  ui->pixelHistory->hide();
+  ui->debugPixelContext->hide();
+  ui->pixelcontextgrid->setRowMinimumHeight(1, 0);
+  ui->pixelcontextgrid->setRowStretch(0, 1);
+
+  ui->pixelContextClose->setText(QString());
+  ui->pixelContextClose->setIcon(QIcon(QPixmap::fromImage(PanelCloseIcon::image())));
+  ui->pixelContextClose->setIconSize(QSize(19, 19));
+  ui->pixelContextClose->setToolButtonStyle(Qt::ToolButtonIconOnly);
+  ui->pixelContextClose->setFixedSize(28, 28);
+  QObject::connect(ui->pixelContextClose, &QToolButton::clicked, this,
+                   [this]() { ui->dockarea->hideToolWindow(ui->pixelContextLayout); });
+
+  auto setupThumbnailPanel = [this](ThumbnailStrip *panel) {
+    QObject::connect(panel, &ThumbnailStrip::closeRequested, this, [this, panel]() {
+      ui->dockarea->hideToolWindow(panel);
+    });
+    styleThumbnailArea(panel);
+  };
+  setupThumbnailPanel(ui->inputThumbs);
+  setupThumbnailPanel(ui->outputThumbs);
+  styleThumbnailPanels();
+
   m_Goto = new TextureGoto(this, [this](QPoint p) { GotoLocation(p.x(), p.y()); });
+
+  // The dock manager already implements tab dragging, splitter docking and floating windows.
+  // Expose the hidden auxiliary panels through a small menu so closing a panel is reversible.
+  QWidget *actionFrame = ui->extensions->parentWidget();
+  QHBoxLayout *actionLayout = qobject_cast<QHBoxLayout *>(actionFrame->layout());
+  if(actionLayout)
+  {
+    QToolButton *panels = new QToolButton(actionFrame);
+    panels->setAutoRaise(true);
+    panels->setIcon(style()->standardIcon(QStyle::SP_TitleBarMenuButton));
+    panels->setToolTip(tr("Show or hide Texture Viewer panels"));
+
+    QMenu *panelMenu = new QMenu(panels);
+    panels->setMenu(panelMenu);
+    panels->setPopupMode(QToolButton::InstantPopup);
+
+    QObject::connect(panelMenu, &QMenu::aboutToShow, this, [this, panelMenu]() {
+      panelMenu->clear();
+
+      auto showPanel = [this](QWidget *panel) {
+        if(ui->dockarea->areaOf(panel))
+        {
+          ToolWindowManager::raiseToolWindow(panel);
+          return;
+        }
+
+        ToolWindowManagerArea *renderArea = ui->dockarea->areaOf(ui->renderContainer);
+        if(!renderArea)
+        {
+          ui->dockarea->moveToolWindow(ui->renderContainer, ToolWindowManager::EmptySpace);
+          renderArea = ui->dockarea->areaOf(ui->renderContainer);
+        }
+
+        if(panel == ui->textureListFrame)
+        {
+          ui->dockarea->moveToolWindow(
+              panel, ToolWindowManager::AreaReference(ToolWindowManager::BottomOf, renderArea,
+                                                       0.2f));
+        }
+        else if(panel == ui->inputThumbs)
+        {
+          ui->dockarea->moveToolWindow(
+              panel, ToolWindowManager::AreaReference(ToolWindowManager::RightWindowSide,
+                                                       renderArea,
+                                                       0.25f));
+        }
+        else if(panel == ui->outputThumbs)
+        {
+          ToolWindowManagerArea *inputArea = ui->dockarea->areaOf(ui->inputThumbs);
+          if(inputArea)
+            ui->dockarea->moveToolWindow(
+                panel, ToolWindowManager::AreaReference(ToolWindowManager::BottomOf, inputArea,
+                                                         0.25f));
+          else
+            ui->dockarea->moveToolWindow(
+                panel, ToolWindowManager::AreaReference(ToolWindowManager::BottomOf, renderArea,
+                                                         0.25f));
+        }
+        else if(panel == ui->pixelContextLayout)
+        {
+          ui->dockarea->moveToolWindow(
+              panel, ToolWindowManager::AreaReference(ToolWindowManager::BottomOf, renderArea,
+                                                       0.28f));
+        }
+
+        if(panel == ui->inputThumbs)
+          styleThumbnailArea(ui->inputThumbs);
+        else if(panel == ui->outputThumbs)
+          styleThumbnailArea(ui->outputThumbs);
+      };
+
+      auto addPanelAction = [this, panelMenu, showPanel](const QString &title, QWidget *panel) {
+        QAction *action = panelMenu->addAction(title);
+        action->setCheckable(true);
+        action->setChecked(ui->dockarea->areaOf(panel) != NULL);
+        QObject::connect(action, &QAction::triggered, this, [this, panel, showPanel](bool visible) {
+          if(visible)
+            showPanel(panel);
+          else
+            ui->dockarea->hideToolWindow(panel);
+        });
+      };
+
+      addPanelAction(tr("Texture List"), ui->textureListFrame);
+      addPanelAction(tr("Inputs"), ui->inputThumbs);
+      addPanelAction(tr("Outputs"), ui->outputThumbs);
+      addPanelAction(tr("Pixel Context"), ui->pixelContextLayout);
+
+#if defined(RENDERDOC_QML_UI)
+      if(m_QmlToolbar)
+      {
+        QAction *qmlPanel = panelMenu->addAction(tr("Viewer Controls"));
+        qmlPanel->setCheckable(true);
+        qmlPanel->setChecked(ui->dockarea->areaOf(m_QmlToolbar) != NULL);
+        QObject::connect(qmlPanel, &QAction::triggered, this, [this](bool visible) {
+          if(!m_QmlToolbar)
+            return;
+
+          if(visible)
+          {
+            ToolWindowManagerArea *renderArea = ui->dockarea->areaOf(ui->renderContainer);
+            if(!renderArea)
+            {
+              ui->dockarea->moveToolWindow(ui->renderContainer, ToolWindowManager::EmptySpace);
+              renderArea = ui->dockarea->areaOf(ui->renderContainer);
+            }
+
+            ui->dockarea->moveToolWindow(
+                m_QmlToolbar,
+                ToolWindowManager::AreaReference(ToolWindowManager::TopOf, renderArea, 0.12f));
+            qmlStyleToolbarArea();
+          }
+          else
+          {
+            ui->dockarea->hideToolWindow(m_QmlToolbar);
+          }
+        });
+      }
+#endif
+
+      panelMenu->addSeparator();
+      QMenu *controlsMenu = panelMenu->addMenu(tr("Viewer Controls"));
+
+      auto addControlAction = [this, controlsMenu](const QString &title, QWidget *panel) {
+        QAction *action = controlsMenu->addAction(title);
+        action->setCheckable(true);
+        action->setChecked(panel->isVisible());
+        QObject::connect(action, &QAction::triggered, this, [panel](bool visible) {
+          panel->setVisible(visible);
+        });
+      };
+
+      addControlAction(tr("Channels"), ui->channelsToolbar);
+      addControlAction(tr("Subresource"), ui->subresourceToolbar);
+      addControlAction(tr("Actions"), ui->actionToolbar);
+      addControlAction(tr("Zoom"), ui->zoomToolbar);
+      addControlAction(tr("Overlay"), ui->overlayToolbar);
+      addControlAction(tr("Range"), ui->rangeToolbar);
+    });
+
+    actionLayout->insertWidget(actionLayout->indexOf(ui->extensions), panels);
+  }
 
   QVBoxLayout *vertical = new QVBoxLayout(this);
 
@@ -608,15 +847,96 @@ TextureViewer::TextureViewer(ICaptureContext &ctx, QWidget *parent)
   flow2->addWidget(ui->overlayToolbar);
   flow2->addWidget(ui->rangeToolbar);
 
+  auto addToolbarCloseButton = [this](QWidget *toolbar, const QString &title) {
+    QHBoxLayout *layout = qobject_cast<QHBoxLayout *>(toolbar->layout());
+    if(!layout)
+      return;
+
+    QToolButton *close = new QToolButton(toolbar);
+    close->setAutoRaise(true);
+    // Some platform styles return an unsuitable bitmap for SP_TitleBarCloseButton
+    // in the compact toolbar style. Use a text glyph so the close affordance is
+    // stable across styles and DPI settings.
+    close->setText(QString(QChar(0x00D7)));
+    close->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    close->setStyleSheet(QStringLiteral("QToolButton { font-size: 16px; font-weight: bold; }"));
+    close->setToolTip(tr("Hide %1 toolbar").arg(title));
+    close->setFixedSize(style()->pixelMetric(QStyle::PM_SmallIconSize) + 6,
+                        style()->pixelMetric(QStyle::PM_SmallIconSize) + 6);
+    layout->addWidget(close);
+
+    QObject::connect(close, &QToolButton::clicked, this, [toolbar]() { toolbar->hide(); });
+  };
+
+  addToolbarCloseButton(ui->channelsToolbar, tr("Channels"));
+  addToolbarCloseButton(ui->subresourceToolbar, tr("Subresource"));
+  addToolbarCloseButton(ui->actionToolbar, tr("Actions"));
+  addToolbarCloseButton(ui->zoomToolbar, tr("Zoom"));
+  addToolbarCloseButton(ui->overlayToolbar, tr("Overlay"));
+  addToolbarCloseButton(ui->rangeToolbar, tr("Range"));
+
   vertical->addWidget(flow1widget);
   vertical->addWidget(flow2widget);
+#if defined(RENDERDOC_QML_UI)
+  // QML pilot: replace only the control chrome. The render canvas and all existing
+  // Widgets-backed state remain in place, so this is a reversible migration seam.
+  // RenderDoc creates and tears down native replay graphics contexts while a capture is
+  // loading. QQuickWidget's default OpenGL scene graph can lose its context in that
+  // transition, leaving the QML surface black even though the replay widgets still work.
+  // This toolbar is small and interaction-only, so use Qt's software scene graph to keep
+  // it independent from the replay device.
+  QQuickWindow::setSceneGraphBackend(QStringLiteral("software"));
+
+  flow1widget->hide();
+  flow2widget->hide();
+
+  m_QmlToolbar = new QQuickWidget(this);
+  m_QmlToolbar->setResizeMode(QQuickWidget::SizeRootObjectToView);
+  m_QmlToolbar->setAttribute(Qt::WA_TranslucentBackground);
+  m_QmlToolbar->setClearColor(Qt::transparent);
+  m_QmlToolbar->engine()->addImageProvider(
+      QStringLiteral("renderdoc_panel"), new PanelCloseImageProvider());
+  m_QmlToolbar->rootContext()->setContextProperty(QStringLiteral("textureViewer"), this);
+  QObject::connect(m_QmlToolbar, &QQuickWidget::sceneGraphError, this,
+                   [](QQuickWindow::SceneGraphError error, const QString &message) {
+                     qWarning() << "[QML-UI] Scene graph error" << error << message;
+                   });
+  m_QmlToolbar->setSource(QUrl(QStringLiteral("qrc:/qml/TextureViewerToolbar.qml")));
+  m_QmlToolbar->installEventFilter(this);
+  m_QmlToolbar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+  m_QmlToolbar->setMinimumWidth(0);
+  m_QmlToolbar->setMinimumHeight(72);
+  m_QmlToolbar->setMaximumHeight(QWIDGETSIZE_MAX);
+#endif
   vertical->addWidget(ui->dockarea);
 
-  Ui_TextureViewer *u = ui;
-  u->pixelcontextgrid->setAlignment(u->pixelHistory, Qt::AlignCenter);
-  u->pixelcontextgrid->setAlignment(u->debugPixelContext, Qt::AlignCenter);
+#if defined(RENDERDOC_QML_UI)
+  m_QmlToolbar->setObjectName(QStringLiteral("textureViewerQmlToolbar"));
+  m_QmlToolbar->setWindowTitle(tr("Viewer Controls"));
+  ToolWindowManagerArea *qmlRenderArea = ui->dockarea->areaOf(ui->inputThumbs);
+  ui->dockarea->addToolWindow(
+      m_QmlToolbar,
+      ToolWindowManager::AreaReference(ToolWindowManager::TopOf, qmlRenderArea, 0.12f));
+  ui->dockarea->setToolWindowProperties(
+      m_QmlToolbar, ToolWindowManager::HideOnClose | ToolWindowManager::DisallowUserDocking |
+                        ToolWindowManager::DisallowFloatWindow);
+
+  // Reset() runs before the QML object exists, so its initial channel/display signals
+  // cannot reach the QML Connections object. Re-run the native state calculation once
+  // after the toolbar has been created and entered the tool-window manager.
+  QTimer::singleShot(0, this, [this]() {
+    if(m_QmlToolbar)
+      UI_UpdateChannels();
+  });
+#endif
 
   QWidget *statusflowWidget = new QWidget(this);
+  statusflowWidget->setObjectName(QStringLiteral("textureStatusBar"));
+  statusflowWidget->setAttribute(Qt::WA_StyledBackground, true);
+  statusflowWidget->setStyleSheet(QStringLiteral(
+      "QWidget#textureStatusBar { background: #1b232e; border: 1px solid #3a4758;"
+      " border-radius: 8px; }"
+      "QLabel { color: #ffffff; background: transparent; }"));
 
   ui->statusbar->removeWidget(ui->texStatusName);
   ui->statusbar->removeWidget(ui->texStatusDim);
@@ -625,25 +945,35 @@ TextureViewer::TextureViewer(ICaptureContext &ctx, QWidget *parent)
   ui->statusbar->removeWidget(ui->hoverText);
   ui->statusbar->removeWidget(ui->pickedText);
 
-  FlowLayout *statusflow = new FlowLayout(0, 3, 0);
+  ui->pickSwatch->hide();
+  ui->hoverText->hide();
+  ui->pickedText->hide();
 
-  statusflowWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
-
-  statusflow->addWidget(ui->texStatusName);
-  statusflow->addWidget(ui->texStatusDim);
-  statusflow->addWidget(ui->texStatusFormat);
-  statusflow->addWidget(ui->pickSwatch);
-  statusflow->addWidget(ui->hoverText);
-  statusflow->addWidget(ui->pickedText);
+  QHBoxLayout *statusflow = new QHBoxLayout(statusflowWidget);
+  statusflow->setContentsMargins(10, 4, 10, 4);
+  statusflow->setSpacing(18);
+  statusflowWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  statusflowWidget->setMinimumHeight(30);
+  statusflowWidget->setMaximumHeight(34);
 
   ui->texStatusName->setFont(Formatter::FixedFont());
   ui->texStatusDim->setFont(Formatter::FixedFont());
   ui->texStatusFormat->setFont(Formatter::FixedFont());
+  ui->texStatusName->setStyleSheet(QStringLiteral("color: #ffffff; background: transparent;"));
+  ui->texStatusDim->setStyleSheet(QStringLiteral("color: #ffffff; background: transparent;"));
+  ui->texStatusFormat->setStyleSheet(QStringLiteral("color: #ffffff; background: transparent;"));
   ui->hoverText->setFont(Formatter::FixedFont());
   ui->pickedText->setFont(Formatter::FixedFont());
 
+  statusflow->addWidget(ui->texStatusName);
+  statusflow->addWidget(ui->texStatusDim);
+  statusflow->addWidget(ui->texStatusFormat);
+  statusflow->addStretch(1);
+
+  ui->renderLayout->removeItem(ui->gridLayout);
   ui->renderLayout->removeItem(ui->statusbar);
-  ui->renderLayout->addItem(statusflow);
+  ui->renderLayout->addLayout(ui->gridLayout);
+  ui->renderLayout->addWidget(statusflowWidget);
 
   ui->channels->addItems({lit("RGBA"), lit("RGBM"), lit("YUVA decode"), tr("Custom")});
 
@@ -705,6 +1035,218 @@ TextureViewer::~TextureViewer()
   delete ui;
 }
 
+void TextureViewer::qmlToggleChannel(int index)
+{
+  if(index < 0 || index > 3)
+    return;
+
+  RDToolButton *buttons[] = {ui->channelRed, ui->channelGreen, ui->channelBlue,
+                             ui->channelAlpha};
+  QSignalBlocker blocker(buttons[index]);
+  buttons[index]->setChecked(!buttons[index]->isChecked());
+
+  UI_UpdateChannels();
+}
+
+bool TextureViewer::qmlGetChannelVisibility(int index) const
+{
+  const RDToolButton *buttons[] = {ui->channelRed, ui->channelGreen, ui->channelBlue,
+                                   ui->channelAlpha};
+  return index >= 0 && index < 4 && buttons[index]->isChecked();
+}
+
+void TextureViewer::qmlToggleGamma()
+{
+  if(!qmlCanUseGamma())
+    return;
+
+  // The native control deliberately disables gamma override for swap buffers and
+  // already-sRGB textures. The QML viewer exposes an explicit preview override, so
+  // keep its state separate and let the replay display apply either presentation mode.
+  m_QmlGammaOverrideActive = true;
+  m_QmlGammaOverrideValue = !m_TexDisplay.linearDisplayAsGamma;
+
+  QSignalBlocker blocker(ui->gammaDisplay);
+  ui->gammaDisplay->setChecked(m_QmlGammaOverrideValue);
+  UI_UpdateChannels();
+}
+
+bool TextureViewer::qmlIsGammaDisplay() const
+{
+  return m_TexDisplay.linearDisplayAsGamma;
+}
+
+bool TextureViewer::qmlCanUseGamma() const
+{
+  return m_Ctx.IsCaptureLoaded() && m_TexDisplay.resourceId != ResourceId();
+}
+
+void TextureViewer::qmlToggleFlipY()
+{
+  QSignalBlocker blocker(ui->flip_y);
+  ui->flip_y->setChecked(!ui->flip_y->isChecked());
+  UI_UpdateChannels();
+}
+
+bool TextureViewer::qmlIsFlipY() const
+{
+  return ui->flip_y->isChecked();
+}
+
+bool TextureViewer::qmlCanSaveTexture() const
+{
+  return ui->saveTex->isEnabled();
+}
+
+void TextureViewer::qmlSaveCurrentTexture()
+{
+  on_saveTex_clicked();
+}
+
+void TextureViewer::qmlCloseToolbar()
+{
+#if defined(RENDERDOC_QML_UI)
+  if(m_QmlToolbar)
+    ui->dockarea->hideToolWindow(m_QmlToolbar);
+#endif
+}
+
+void TextureViewer::styleThumbnailArea(ThumbnailStrip *panel)
+{
+  if(!panel)
+    return;
+
+  if(ToolWindowManagerArea *area = ui->dockarea->areaOf(panel))
+  {
+    area->setObjectName(QStringLiteral("textureThumbnailArea"));
+    area->tabBar()->hide();
+    area->setStyleSheet(QStringLiteral(
+        "QTabWidget::pane { border: none; background: transparent; }"
+        "QTabBar::tab { border: none; }"));
+  }
+}
+
+void TextureViewer::styleThumbnailPanels()
+{
+  ToolWindowManagerArea *inputArea = ui->dockarea->areaOf(ui->inputThumbs);
+  ToolWindowManagerArea *outputArea = ui->dockarea->areaOf(ui->outputThumbs);
+
+  // A restored layout can put Inputs and Outputs back into one tab area. Split them
+  // again before hiding the manager's tab bar, otherwise one panel would disappear
+  // behind the other with no external tab left to switch it.
+  if(inputArea && outputArea && inputArea == outputArea)
+  {
+    ui->dockarea->moveToolWindow(
+        ui->outputThumbs,
+        ToolWindowManager::AreaReference(ToolWindowManager::BottomOf, inputArea, 0.30f));
+  }
+
+  styleThumbnailArea(ui->inputThumbs);
+  styleThumbnailArea(ui->outputThumbs);
+
+  // Pixel Context has its own dark header and close button. Hide the manager's
+  // outer tab bar so it does not render a second, unrelated title row above it.
+  if(ToolWindowManagerArea *pixelArea = ui->dockarea->areaOf(ui->pixelContextLayout))
+  {
+    pixelArea->setObjectName(QStringLiteral("pixelContextArea"));
+    pixelArea->tabBar()->hide();
+    pixelArea->setStyleSheet(QStringLiteral(
+        "QTabWidget::pane { border: none; background: transparent; }"
+        "QTabBar::tab { border: none; }"));
+  }
+}
+
+void TextureViewer::applyInitialDockLayoutSizes()
+{
+  if(m_InitialDockLayoutSizesApplied)
+    return;
+
+  ToolWindowManagerWrapper *wrapper =
+      ui->dockarea->findChild<ToolWindowManagerWrapper *>(QString(), Qt::FindDirectChildrenOnly);
+  QSplitter *rootSplitter = wrapper ? wrapper->findChild<QSplitter *>(QString(),
+                                                                        Qt::FindDirectChildrenOnly)
+                                    : NULL;
+  if(!rootSplitter || rootSplitter->orientation() != Qt::Horizontal ||
+     rootSplitter->count() != 2)
+    return;
+
+  QList<int> rootSizes = rootSplitter->sizes();
+  int rootTotal = rootSizes.value(0) + rootSizes.value(1);
+  if(rootTotal <= 0)
+    return;
+
+  // Left: Current Output + Pixel Context. Right: Viewer Controls + Inputs + Outputs.
+  rootSplitter->setSizes({int(rootTotal * 0.65f), int(rootTotal * 0.35f)});
+
+  QSplitter *leftSplitter = qobject_cast<QSplitter *>(rootSplitter->widget(0));
+  if(leftSplitter && leftSplitter->orientation() == Qt::Vertical && leftSplitter->count() == 2)
+  {
+    int total = leftSplitter->sizes().value(0) + leftSplitter->sizes().value(1);
+    if(total > 0)
+      leftSplitter->setSizes({int(total * 0.72f), int(total * 0.28f)});
+  }
+
+  QSplitter *rightSplitter = qobject_cast<QSplitter *>(rootSplitter->widget(1));
+  if(rightSplitter && rightSplitter->orientation() == Qt::Vertical && rightSplitter->count() == 3)
+  {
+    int total = 0;
+    for(int size : rightSplitter->sizes())
+      total += size;
+    if(total > 0)
+      rightSplitter->setSizes({int(total * 0.20f), int(total * 0.40f), int(total * 0.40f)});
+  }
+
+  m_InitialDockLayoutSizesApplied = true;
+}
+
+#if defined(RENDERDOC_QML_UI)
+void TextureViewer::qmlStyleToolbarArea()
+{
+  if(!m_QmlToolbar)
+    return;
+
+  if(ToolWindowManagerArea *qmlArea = ui->dockarea->areaOf(m_QmlToolbar))
+  {
+    qmlArea->setObjectName(QStringLiteral("viewerControlsArea"));
+    qmlArea->tabBar()->hide();
+    qmlArea->setStyleSheet(QStringLiteral(
+        "QTabWidget::pane { border: none; background: transparent; }"
+        "QTabBar::tab { border: none; }"));
+  }
+}
+
+void TextureViewer::qmlEnsureToolbarDocked()
+{
+  if(!m_QmlToolbar)
+    return;
+
+  ToolWindowManagerArea *inputArea = ui->dockarea->areaOf(ui->inputThumbs);
+  if(!inputArea)
+    return;
+
+  ToolWindowManagerArea *toolbarArea = ui->dockarea->areaOf(m_QmlToolbar);
+  if(!toolbarArea)
+    return;
+
+  QWidget *toolbarParent = toolbarArea->parentWidget();
+  QSplitter *toolbarSplitter = qobject_cast<QSplitter *>(toolbarParent);
+  bool toolbarIsAboveRender = toolbarSplitter &&
+                              toolbarSplitter->orientation() == Qt::Vertical &&
+                              toolbarSplitter->indexOf(toolbarArea) >= 0 &&
+                              toolbarSplitter->indexOf(inputArea) >= 0;
+
+  if(!toolbarIsAboveRender)
+  {
+    ui->dockarea->moveToolWindow(
+        m_QmlToolbar,
+        ToolWindowManager::AreaReference(ToolWindowManager::TopOf, inputArea, 0.20f));
+  }
+
+  m_QmlToolbarInitialDocked = true;
+  qmlStyleToolbarArea();
+}
+#endif
+
 void TextureViewer::enterEvent(QEvent *event)
 {
   HighlightUsage();
@@ -713,6 +1255,45 @@ void TextureViewer::enterEvent(QEvent *event)
 void TextureViewer::showEvent(QShowEvent *event)
 {
   HighlightUsage();
+
+  QTimer::singleShot(0, this, [this]() { styleThumbnailPanels(); });
+  QTimer::singleShot(0, this, [this]() { applyInitialDockLayoutSizes(); });
+  QTimer::singleShot(250, this, [this]() { applyInitialDockLayoutSizes(); });
+  QTimer::singleShot(1000, this, [this]() { applyInitialDockLayoutSizes(); });
+#if defined(RENDERDOC_QML_UI)
+  if(m_QmlToolbar && !m_QmlToolbarInitialDocked)
+  {
+    m_QmlToolbarInitialDocked = true;
+    auto ensureToolbar = [this]() {
+      if(!m_QmlToolbar)
+        return;
+
+      qmlEnsureToolbarDocked();
+
+      // The first visible state may be established after the capture viewer has been
+      // constructed. Synchronise once more after the initial tool-window layout exists.
+      UI_UpdateChannels();
+    };
+
+    // Layout restoration can finish after the first show event. Check again after
+    // the restore pass without reopening a toolbar that the user intentionally hid.
+    QTimer::singleShot(0, this, ensureToolbar);
+    QTimer::singleShot(250, this, ensureToolbar);
+    QTimer::singleShot(1000, this, ensureToolbar);
+  }
+#endif
+}
+
+bool TextureViewer::eventFilter(QObject *object, QEvent *event)
+{
+#if defined(RENDERDOC_QML_UI)
+  if(object == m_QmlToolbar && event->type() == QEvent::ParentChange)
+  {
+    QTimer::singleShot(0, this, [this]() { qmlStyleToolbarArea(); });
+  }
+#endif
+
+  return QFrame::eventFilter(object, event);
 }
 
 void TextureViewer::HighlightUsage()
@@ -1153,14 +1734,12 @@ void TextureViewer::UI_UpdateStatusText()
 
 void TextureViewer::UI_UpdateTextureDetails()
 {
-  QString status;
-
   TextureDescription *texptr = GetCurrentTexture();
   if(texptr == NULL)
   {
-    ui->texStatusName->setText(status);
-    ui->texStatusDim->setText(status);
-    ui->texStatusFormat->setText(status);
+    ui->texStatusName->clear();
+    ui->texStatusDim->clear();
+    ui->texStatusFormat->clear();
 
     ui->renderContainer->setWindowTitle(tr("Unbound"));
     return;
@@ -1222,65 +1801,15 @@ void TextureViewer::UI_UpdateTextureDetails()
     ui->renderContainer->setWindowTitle(title);
   }
 
-  ui->texStatusName->setText(m_Ctx.GetResourceName(current.resourceId) + lit(" - "));
+  uint64_t textureId = 0;
+  memcpy(&textureId, &current.resourceId, sizeof(textureId));
+  ui->texStatusName->setText(tr("Texture ID: %1").arg(textureId));
 
-  status = QString();
-
-  if(current.dimension >= 1)
-    status += QString::number(current.width);
+  QString dimensions = QString::number(current.width);
   if(current.dimension >= 2)
-    status += lit("x") + QString::number(current.height);
-  if(current.dimension >= 3)
-    status += lit("x") + QString::number(current.depth);
-
-  if(current.arraysize > 1)
-    status += QFormatStr("[%1]").arg(QString::number(current.arraysize));
-
-  if(current.msSamp > 1)
-  {
-    // quality is only used by D3D, specify these here for simplicity
-    if(current.msQual == 0xffffffff)
-      status += QFormatStr(" MS %1x Std Pattern").arg(current.msSamp);
-    else if(current.msQual == 0xfffffffe)
-      status += QFormatStr(" MS %1x Cent Pattern").arg(current.msSamp);
-    else if(current.msQual > 0)
-      status += QFormatStr(" MS %1x %2 Quality").arg(current.msSamp).arg(current.msQual);
-    else
-      status += QFormatStr(" MS %1x").arg(current.msSamp);
-  }
-
-  status += QFormatStr(" %1 mips").arg(current.mips);
-
-  status += lit(" - ");
-
-  ui->texStatusDim->setText(status);
-
-  status = current.format.Name();
-
-  const bool yuv = (current.format.type == ResourceFormatType::YUV8 ||
-                    current.format.type == ResourceFormatType::YUV10 ||
-                    current.format.type == ResourceFormatType::YUV12 ||
-                    current.format.type == ResourceFormatType::YUV16);
-
-  CompType viewCast = CompType::Typeless;
-
-  if(current.format.compType != m_TexDisplay.typeCast &&
-     m_TexDisplay.typeCast != CompType::Typeless && !yuv)
-  {
-    viewCast = m_TexDisplay.typeCast;
-  }
-  else if(current.format.compType == CompType::Typeless &&
-          m_TexDisplay.typeCast == CompType::Typeless && !yuv)
-  {
-    // if it's a typeless texture and we don't have a hint, ensure the user knows it's being viewed
-    // as unorm as a fallback
-    viewCast = CompType::UNorm;
-  }
-
-  if(viewCast != CompType::Typeless)
-    status += tr(" Viewed as %1").arg(ToQStr(viewCast));
-
-  ui->texStatusFormat->setText(status);
+    dimensions += lit(" x ") + QString::number(current.height);
+  ui->texStatusDim->setText(tr("Size: %1").arg(dimensions));
+  ui->texStatusFormat->setText(tr("Format: %1").arg(current.format.Name()));
 }
 
 void TextureViewer::UI_OnTextureSelectionChanged(bool newAction)
@@ -1296,6 +1825,15 @@ void TextureViewer::UI_OnTextureSelectionChanged(bool newAction)
   TextureDescription &tex = *texptr;
 
   bool newtex = (m_TexDisplay.resourceId != tex.resourceId);
+
+#if defined(RENDERDOC_QML_UI)
+  if(newtex)
+  {
+    // A presentation override belongs to the currently viewed resource. Let the
+    // normal RenderDoc rules establish the default for each newly selected texture.
+    m_QmlGammaOverrideActive = false;
+  }
+#endif
 
   // save settings for this current texture
   if(m_Ctx.Config().TextureViewer_PerTexSettings)
@@ -1656,6 +2194,11 @@ void TextureViewer::UI_UpdateChannels()
   if(tex != NULL && tex->format.SRGBCorrected())
     m_TexDisplay.linearDisplayAsGamma = false;
 
+#if defined(RENDERDOC_QML_UI)
+  if(m_QmlGammaOverrideActive && tex != NULL)
+    m_TexDisplay.linearDisplayAsGamma = m_QmlGammaOverrideValue;
+#endif
+
   bool dsv = false;
   if(tex != NULL)
     dsv = (tex->creationFlags & TextureCategory::DepthTarget) ||
@@ -1865,6 +2408,15 @@ void TextureViewer::UI_UpdateChannels()
   INVOKE_MEMFN(RT_UpdateAndDisplay);
   INVOKE_MEMFN(RT_UpdateVisualRange);
   UI_UpdateStatusText();
+
+#if defined(RENDERDOC_QML_UI)
+  emit qmlChannelsChanged(ui->channelRed->isChecked(), ui->channelGreen->isChecked(),
+                          ui->channelBlue->isChecked(), ui->channelAlpha->isChecked());
+  emit qmlGammaChanged(m_TexDisplay.linearDisplayAsGamma);
+  emit qmlGammaAvailabilityChanged(qmlCanUseGamma());
+  emit qmlFlipChanged(ui->flip_y->isChecked());
+  emit qmlSaveAvailabilityChanged(ui->saveTex->isEnabled());
+#endif
 }
 
 void TextureViewer::SetupTextureTabs()
@@ -1877,6 +2429,23 @@ void TextureViewer::SetupTextureTabs()
   QIcon tabIcon;
   tabIcon.addFile(QStringLiteral(":/logo.svg"), QSize(), QIcon::Normal, QIcon::Off);
 
+  textureTabs->setObjectName(QStringLiteral("textureOutputArea"));
+  textureTabs->setAttribute(Qt::WA_StyledBackground, true);
+  textureTabs->setAutoFillBackground(true);
+  textureTabs->setDocumentMode(true);
+  textureTabs->setStyleSheet(QStringLiteral(
+      "QTabWidget#textureOutputArea { background: #1b232e; border: 1px solid #3a4758;"
+      " border-radius: 8px; }"
+      "QTabWidget#textureOutputArea::pane { background: #1b232e; border: none;"
+      " border-radius: 7px; }"
+      "QTabWidget#textureOutputArea QTabBar { background: #1b232e; border: none; }"
+      "QTabBar::tab { color: #e7eef7; background: #1b232e; border: none;"
+      " border-top-left-radius: 8px; border-top-right-radius: 8px;"
+      " padding: 7px 12px; min-height: 28px; }"
+      "QTabBar::tab:selected { color: #ffffff; background: #1b232e;"
+      " border-bottom: 2px solid #5e8dbb; }"
+      "QTabBar::tab:hover:!selected { background: #293748; }"));
+
   textureTabs->setTabIcon(0, tabIcon);
 
   textureTabs->setElideMode(Qt::ElideRight);
@@ -1886,31 +2455,12 @@ void TextureViewer::SetupTextureTabs()
   QObject::connect(textureTabs, &QTabWidget::tabCloseRequested, this,
                    &TextureViewer::textureTab_Closing);
 
-  textureTabs->disableUserDrop();
-
   textureTabs->tabBar()->setContextMenuPolicy(Qt::CustomContextMenu);
+  textureTabs->tabBar()->setExpanding(true);
+  textureTabs->tabBar()->setUsesScrollButtons(false);
 
   QObject::connect(textureTabs->tabBar(), &QTabBar::customContextMenuRequested, this,
                    &TextureViewer::textureTab_Menu);
-
-  // show any fixed panels that got closed by previous bugs and saved as closed
-
-  if(ui->dockarea->areaOf(ui->inputThumbs) == NULL)
-    ui->dockarea->moveToolWindow(
-        ui->inputThumbs,
-        ToolWindowManager::AreaReference(ToolWindowManager::RightOf,
-                                         ui->dockarea->areaOf(ui->renderContainer), 0.25f));
-
-  if(ui->dockarea->areaOf(ui->outputThumbs) == NULL)
-    ui->dockarea->moveToolWindow(
-        ui->outputThumbs, ToolWindowManager::AreaReference(ToolWindowManager::AddTo,
-                                                           ui->dockarea->areaOf(ui->inputThumbs)));
-
-  if(ui->dockarea->areaOf(ui->pixelContextLayout) == NULL)
-    ui->dockarea->moveToolWindow(
-        ui->pixelContextLayout,
-        ToolWindowManager::AreaReference(ToolWindowManager::BottomOf,
-                                         ui->dockarea->areaOf(ui->outputThumbs), 0.25f));
 
   ui->renderContainer->setLayout(ui->renderLayout);
 }
@@ -2738,10 +3288,31 @@ void TextureViewer::render_keyPress(QKeyEvent *e)
 
   if(e->matches(QKeySequence::Copy))
   {
+    if(m_PickedPoint.x() < 0 || m_PickedPoint.y() < 0)
+    {
+      e->accept();
+      return;
+    }
+
+    CompType compType = texptr->format.compType;
+    if(compType != m_TexDisplay.typeCast && m_TexDisplay.typeCast != CompType::Typeless)
+      compType = m_TexDisplay.typeCast;
+
+    QStringList rgba;
+    for(int i = 0; i < 4; i++)
+    {
+      if(compType == CompType::UInt)
+        rgba.push_back(Formatter::Format(m_CurPixelValue.uintValue[i]));
+      else if(compType == CompType::SInt)
+        rgba.push_back(Formatter::Format(m_CurPixelValue.intValue[i]));
+      else
+        rgba.push_back(Formatter::Format(m_CurPixelValue.floatValue[i]));
+    }
+
     QClipboard *clipboard = QApplication::clipboard();
-    clipboard->setText(ui->texStatusName->text() + ui->texStatusDim->text() +
-                       ui->texStatusFormat->text() + lit(" | ") + ui->hoverText->text() +
-                       ui->pickedText->text());
+    clipboard->setText(rgba.join(lit(", ")));
+    e->accept();
+    return;
   }
 
   if(!m_Ctx.IsCaptureLoaded())
@@ -2857,18 +3428,7 @@ void TextureViewer::UI_CalcScrollbars()
     size = QSizeF(texptr->width, texptr->height);
   }
 
-  if((int)floor(size.width() * m_TexDisplay.scale) <= realRenderWidth())
-  {
-    ui->renderHScroll->setEnabled(false);
-  }
-  else
-  {
-    ui->renderHScroll->setEnabled(true);
-
-    ui->renderHScroll->setMaximum((int)ceil(size.width() * m_TexDisplay.scale - realRenderWidth()));
-    ui->renderHScroll->setPageStep(qMax(1, ui->renderHScroll->maximum() / 6));
-    ui->renderHScroll->setSingleStep(int(m_TexDisplay.scale));
-  }
+  ui->renderHScroll->setEnabled(false);
 
   if((int)floor(size.height() * m_TexDisplay.scale) <= realRenderHeight())
   {
@@ -2962,6 +3522,24 @@ void TextureViewer::OnCaptureLoaded()
                    &TextureViewer::customShaderModified);
 
   m_NeedCustomReload = true;
+
+#if defined(RENDERDOC_QML_UI)
+  // Capture loading can temporarily cover the QML FBO while native replay widgets are
+  // created. Re-submit the scene after the load callback and after the layout pass.
+  if(m_QmlToolbar && m_QmlToolbar->isVisible())
+  {
+    QTimer::singleShot(0, this, [this]() {
+      if(!m_QmlToolbar)
+        return;
+
+      m_QmlToolbar->setSource(QUrl(QStringLiteral("qrc:/qml/TextureViewerToolbar.qml")));
+      m_QmlToolbar->show();
+      m_QmlToolbar->update();
+      if(m_QmlToolbar->quickWindow())
+        m_QmlToolbar->quickWindow()->update();
+    });
+  }
+#endif
 }
 
 void TextureViewer::Reset()
@@ -2972,6 +3550,10 @@ void TextureViewer::Reset()
   m_PickedPoint.setY(-1);
 
   memset(&m_TexDisplay, 0, sizeof(m_TexDisplay));
+#if defined(RENDERDOC_QML_UI)
+  m_QmlGammaOverrideActive = false;
+  m_QmlGammaOverrideValue = false;
+#endif
   m_TexDisplay.backgroundColor =
       backCol.isValid() ? FloatVector(backCol.redF(), backCol.greenF(), backCol.blueF(), 1.0f)
                         : FloatVector();
@@ -3357,6 +3939,7 @@ void TextureViewer::OnEventChanged(uint32_t eventId)
 QVariant TextureViewer::persistData()
 {
   QVariantMap state = ui->dockarea->saveState();
+  state[lit("dockLayoutVersion")] = 3;
 
   QVariantList columns;
   for(int i = 0; i < TextureListFilter::Column_Count; i++)
@@ -3411,9 +3994,18 @@ void TextureViewer::setPersistData(const QVariant &persistData)
 
   updateBackgroundColors();
 
-  ui->dockarea->restoreState(state);
+  // Older saved layouts belong to the previous experimental arrangement and could
+  // place Pixel Context underneath the whole root. Ignore only that stale layout;
+  // the constructor now creates the new two-column default directly.
+  m_InitialDockLayoutSizesApplied = state.value(lit("dockLayoutVersion")).toInt() >= 3;
+  if(m_InitialDockLayoutSizesApplied)
+    ui->dockarea->restoreState(state);
 
   SetupTextureTabs();
+
+#if defined(RENDERDOC_QML_UI)
+  qmlStyleToolbarArea();
+#endif
 }
 
 float TextureViewer::GetFitScale()

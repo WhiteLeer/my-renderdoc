@@ -24,6 +24,7 @@
 
 #include "ResourcePreview.h"
 #include <QMouseEvent>
+#include <QStyle>
 #include "Code/QRDUtils.h"
 #include "ui_ResourcePreview.h"
 
@@ -58,6 +59,19 @@ ResourcePreview::ResourcePreview(bool, QWidget *parent)
 
 void ResourcePreview::Initialise()
 {
+  setFrameShape(QFrame::StyledPanel);
+  setLineWidth(1);
+  setMidLineWidth(0);
+  setAttribute(Qt::WA_StyledBackground, true);
+  setStyleSheet(QStringLiteral(
+      "QFrame#ResourcePreview { background: #202a36; border: 1px solid #35485e;"
+      " border-radius: 6px; }"
+      "QFrame#ResourcePreview[selected=\"true\"] { border: 2px solid #5e8dbb; }"
+      "QLabel#slotLabel { color: #e7eef7; background: #293748;"
+      " border: none; padding: 1px 4px; }"
+      "QLabel#descriptionLabel { color: #9eacbb; background: #202a36;"
+      " border: none; padding: 1px 4px; }"));
+
   setBackgroundRole(QPalette::Background);
   setForegroundRole(QPalette::Foreground);
 
@@ -137,6 +151,11 @@ void ResourcePreview::setSize(QSize s)
 void ResourcePreview::setSelected(bool sel)
 {
   m_Selected = sel;
+
+  setProperty("selected", sel);
+  style()->unpolish(this);
+  style()->polish(this);
+  update();
 
   setForegroundRole(sel ? QPalette::Highlight : QPalette::Foreground);
 }
