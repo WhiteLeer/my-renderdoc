@@ -65,6 +65,9 @@
   <PropertyGroup>
     <LocalDebuggerWorkingDirectory>$(OutputDirectory)</LocalDebuggerWorkingDirectory>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(RENDERDOC_QML_UI)'=='1'">
+    <QmlQtLibraries>Qt5QuickWidgets.lib;Qt5Quick.lib;Qt5Qml.lib</QmlQtLibraries>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Platform)'=='x64'">
     <ClCompile>
       <PreprocessorDefinitions>WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -72,6 +75,15 @@
     <ResourceCompile>
       <PreprocessorDefinitions>WIN64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(RENDERDOC_QML_UI)'=='1'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(QtIncludeDir)\QtQml;$(QtIncludeDir)\QtQuick;$(QtIncludeDir)\QtQuickWidgets;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>RENDERDOC_QML_UI;QT_QML_LIB;QT_QUICK_LIB;QT_QUICKWIDGETS_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>Qt5QuickWidgets.lib;Qt5Quick.lib;Qt5Qml.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
     <ClCompile>
@@ -119,7 +131,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>user32.lib;$(PythonImportLib);qtmain.lib;Qt5Widgets.lib;Qt5Gui.lib;Qt5Core.lib;Qt5Svg.lib;Qt5Network.lib;shell32.lib</AdditionalDependencies>
+      <AdditionalDependencies>user32.lib;$(PythonImportLib);qtmain.lib;Qt5Widgets.lib;Qt5Gui.lib;Qt5Core.lib;Qt5Svg.lib;Qt5Network.lib;$(QmlQtLibraries);shell32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>3rdparty\pyside\$(Platform);$(QtLibDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <DataExecutionPrevention>true</DataExecutionPrevention>
       <IgnoreImportLibrary>true</IgnoreImportLibrary>
@@ -146,7 +158,7 @@
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>user32.lib;$(PythonImportLib);qtmaind.lib;Qt5Widgetsd.lib;Qt5Guid.lib;Qt5Cored.lib;Qt5Svgd.lib;Qt5Networkd.lib;shell32.lib</AdditionalDependencies>
+      <AdditionalDependencies>user32.lib;$(PythonImportLib);qtmaind.lib;Qt5Widgetsd.lib;Qt5Guid.lib;Qt5Cored.lib;Qt5Svgd.lib;Qt5Networkd.lib;$(QmlQtLibraries);shell32.lib</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="Exists('$(SolutionDir)\qrenderdoc\3rdparty\pyside\include\PySide2\pyside.h') AND '$(CustomPythonUsed)'=='0'">
@@ -1916,6 +1928,31 @@
     </Content>
     <Content Include="$(QtBinDir)\Qt5Network.dll">
       <Link>Qt5Network.dll</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
+    <Content Include="$(QtBinDir)\Qt5Qml.dll" Condition="'$(RENDERDOC_QML_UI)'=='1' AND Exists('$(QtBinDir)\Qt5Qml.dll')">
+      <Link>Qt5Qml.dll</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
+    <Content Include="$(QtBinDir)\Qt5Quick.dll" Condition="'$(RENDERDOC_QML_UI)'=='1' AND Exists('$(QtBinDir)\Qt5Quick.dll')">
+      <Link>Qt5Quick.dll</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
+    <Content Include="$(QtBinDir)\Qt5QuickWidgets.dll" Condition="'$(RENDERDOC_QML_UI)'=='1' AND Exists('$(QtBinDir)\Qt5QuickWidgets.dll')">
+      <Link>Qt5QuickWidgets.dll</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
+    <Content Include="$(QtBaseDir)\qml\QtQuick.2\*" Condition="'$(RENDERDOC_QML_UI)'=='1' AND Exists('$(QtBaseDir)\qml\QtQuick.2')">
+      <Link>qml\QtQuick.2\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
+    <Content Include="$(QtBaseDir)\qml\QtQml\*" Condition="'$(RENDERDOC_QML_UI)'=='1' AND Exists('$(QtBaseDir)\qml\QtQml')">
+      <Link>qml\QtQml\%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       <Visible>false</Visible>
     </Content>

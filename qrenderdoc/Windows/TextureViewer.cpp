@@ -2111,7 +2111,7 @@ void TextureViewer::UI_OnTextureSelectionChanged(bool newAction)
       ui->stencilDisplay->setChecked(false);
 
       if(m_Ctx.Config().TextureViewer_PerTexYFlip)
-        ui->flip_y->setChecked(false);
+        ui->flip_y->setChecked(true);
 
       m_NoRangePaint = true;
       UI_SetHistogramRange(texptr, m_TexDisplay.typeCast);
@@ -3590,6 +3590,9 @@ void TextureViewer::Reset()
 
   ui->channels->setCurrentIndex(0);
   ui->overlay->setCurrentIndex(0);
+  // Keep the viewer's default orientation stable when a capture is loaded or reset.
+  // Per-texture settings can still override this when that option is enabled.
+  ui->flip_y->setChecked(true);
 
   {
     QPalette Pal(palette());

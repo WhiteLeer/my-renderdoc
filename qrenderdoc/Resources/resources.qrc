@@ -1,5 +1,6 @@
 <RCC>
     <qresource prefix="/">
+        <file>qml/TextureViewerToolbar.qml</file>
         <file>logo.svg</file>
         <file>topologies/topo_linelist.svg</file>
         <file>topologies/topo_linelist_adj.svg</file>

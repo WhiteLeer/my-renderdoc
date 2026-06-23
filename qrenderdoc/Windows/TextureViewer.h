@@ -96,7 +96,7 @@ struct TexSettings
     displayType = 0;
     r = g = b = true;
     a = false;
-    flip_y = false;
+    flip_y = true;
     depth = true;
     stencil = false;
     mip = 0;
