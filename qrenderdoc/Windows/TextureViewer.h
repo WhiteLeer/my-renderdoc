@@ -42,6 +42,9 @@ class ThumbnailStrip;
 class TextureGoto;
 class QFileSystemWatcher;
 class TextureViewer;
+#if defined(RENDERDOC_QML_UI)
+class QQuickWidget;
+#endif
 
 struct Following
 {
@@ -93,7 +96,7 @@ struct TexSettings
     displayType = 0;
     r = g = b = true;
     a = false;
-    flip_y = false;
+    flip_y = true;
     depth = true;
     stencil = false;
     mip = 0;
@@ -166,6 +169,27 @@ public:
   QVariant persistData();
   void setPersistData(const QVariant &persistData);
 
+public slots:
+  // QML pilot bridge. These slots intentionally forward to the existing Widgets controls so
+  // the first QML migration does not duplicate TextureViewer state or rendering logic.
+  void qmlToggleChannel(int index);
+  bool qmlGetChannelVisibility(int index) const;
+  void qmlToggleGamma();
+  bool qmlIsGammaDisplay() const;
+  bool qmlCanUseGamma() const;
+  void qmlToggleFlipY();
+  bool qmlIsFlipY() const;
+  bool qmlCanSaveTexture() const;
+  void qmlSaveCurrentTexture();
+  void qmlCloseToolbar();
+
+signals:
+  void qmlChannelsChanged(bool red, bool green, bool blue, bool alpha);
+  void qmlGammaChanged(bool srgb);
+  void qmlGammaAvailabilityChanged(bool available);
+  void qmlFlipChanged(bool flip);
+  void qmlSaveAvailabilityChanged(bool available);
+
 private slots:
   // automatic slots
   void on_renderHScroll_valueChanged(int position);
@@ -235,6 +259,7 @@ private slots:
 protected:
   void enterEvent(QEvent *event) override;
   void showEvent(QShowEvent *event) override;
+  bool eventFilter(QObject *object, QEvent *event) override;
 
 private:
   void RT_FetchCurrentPixel(IReplayController *r, uint32_t x, uint32_t y, PixelValue &pickValue,
@@ -251,6 +276,9 @@ private:
   void UI_SetHistogramRange(const TextureDescription *tex, CompType typeCast);
 
   void UI_UpdateChannels();
+  void styleThumbnailArea(ThumbnailStrip *panel);
+  void styleThumbnailPanels();
+  void applyInitialDockLayoutSizes();
 
   void HighlightUsage();
 
@@ -307,6 +335,10 @@ private:
   void UI_UpdateCachedTexture();
 
   void ShowGotoPopup();
+#if defined(RENDERDOC_QML_UI)
+  void qmlStyleToolbarArea();
+  void qmlEnsureToolbarDocked();
+#endif
 
   bool ShouldFlipForGL();
   uint32_t MipCoordFromBase(int coord, const uint32_t dim);
@@ -319,6 +351,9 @@ private:
 
   QPoint m_DragStartScroll;
   QPoint m_DragStartPos;
+
+  bool m_InitialDockLayoutSizesApplied = false;
+
 
   QPoint m_CurHoverPixel;
   QPoint m_PickedPoint;
@@ -348,6 +383,12 @@ private:
   Ui::TextureViewer *ui;
   ICaptureContext &m_Ctx;
   IReplayOutput *m_Output = NULL;
+#if defined(RENDERDOC_QML_UI)
+  QQuickWidget *m_QmlToolbar = NULL;
+  bool m_QmlToolbarInitialDocked = false;
+#endif
+  bool m_QmlGammaOverrideActive = false;
+  bool m_QmlGammaOverrideValue = false;
 
   TextureSave m_SaveConfig;
 

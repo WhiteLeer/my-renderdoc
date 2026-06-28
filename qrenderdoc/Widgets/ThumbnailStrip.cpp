@@ -23,7 +23,14 @@
  ******************************************************************************/
 
 #include "ThumbnailStrip.h"
+#include <QFrame>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QLabel>
 #include <QScrollBar>
+#include <QIcon>
+#include <QToolButton>
+#include "Widgets/PanelCloseIcon.h"
 #include "Widgets/ResourcePreview.h"
 #include "ui_ThumbnailStrip.h"
 
@@ -31,10 +38,74 @@ ThumbnailStrip::ThumbnailStrip(QWidget *parent) : QWidget(parent), ui(new Ui::Th
 {
   ui->setupUi(this);
 
+  setAttribute(Qt::WA_StyledBackground, true);
+  setStyleSheet(QStringLiteral(
+      "ThumbnailStrip { background: #1b232e; border: 1px solid #3a4758;"
+      " border-radius: 8px; }"
+      "#thumbnailPanelHeader { background: #202a36; border: none;"
+      " border-top-left-radius: 7px; border-top-right-radius: 7px; }"
+      "#thumbnailPanelTitle { color: #e7eef7; background: transparent;"
+      " font-size: 11px; font-weight: 600; }"
+      "#thumbnailPanelClose { color: #e7eef7; background: transparent; border: none;"
+      " border-radius: 13px; padding: 0px; }"
+      "#thumbnailPanelClose:hover { background: #354a62; }"
+      "#thumbnailPanelClose:pressed { background: #4777a5; }"
+      "QScrollArea { background: transparent; border: none; }"
+      "QScrollArea QWidget#scrollAreaWidgetContents { background: transparent; }"
+      "QScrollBar:vertical, QScrollBar:horizontal { background: #202a36; border: none; }"
+      "QScrollBar::handle:vertical, QScrollBar::handle:horizontal {"
+      " background: #43566c; border-radius: 3px; min-height: 18px; min-width: 18px; }"
+      "QScrollBar::add-line, QScrollBar::sub-line { width: 0px; height: 0px; }"));
+
+  QGridLayout *grid = qobject_cast<QGridLayout *>(QWidget::layout());
+  if(grid)
+  {
+    grid->removeWidget(ui->scrollArea);
+
+    QFrame *header = new QFrame(this);
+    header->setObjectName(QStringLiteral("thumbnailPanelHeader"));
+    header->setFixedHeight(30);
+
+    QHBoxLayout *headerLayout = new QHBoxLayout(header);
+    headerLayout->setContentsMargins(10, 0, 5, 0);
+    headerLayout->setSpacing(4);
+
+    m_TitleLabel = new QLabel(windowTitle(), header);
+    m_TitleLabel->setObjectName(QStringLiteral("thumbnailPanelTitle"));
+    m_TitleLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    headerLayout->addWidget(m_TitleLabel);
+
+    m_CloseButton = new QToolButton(header);
+    m_CloseButton->setObjectName(QStringLiteral("thumbnailPanelClose"));
+    m_CloseButton->setIcon(QIcon(QPixmap::fromImage(PanelCloseIcon::image())));
+    m_CloseButton->setIconSize(QSize(19, 19));
+    m_CloseButton->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    m_CloseButton->setFixedSize(28, 28);
+    m_CloseButton->setToolTip(tr("Hide %1").arg(windowTitle()));
+    headerLayout->addWidget(m_CloseButton);
+
+    grid->addWidget(header, 0, 0);
+    grid->addWidget(ui->scrollArea, 1, 0);
+
+    QObject::connect(this, &QWidget::windowTitleChanged, this, [this](const QString &title) {
+      if(m_TitleLabel)
+        m_TitleLabel->setText(title);
+      if(m_CloseButton)
+        m_CloseButton->setToolTip(tr("Hide %1").arg(title));
+    });
+    QObject::connect(m_CloseButton, &QToolButton::clicked, this,
+                     &ThumbnailStrip::closeRequested);
+  }
+
   layout = new QVBoxLayout(ui->scrollAreaWidgetContents);
   layout->setSpacing(6);
   layout->setContentsMargins(6, 6, 6, 6);
   layout->setAlignment(Qt::AlignTop);
+}
+
+void ThumbnailStrip::setPanelTitle(const QString &title)
+{
+  setWindowTitle(title);
 }
 
 ThumbnailStrip::~ThumbnailStrip()
@@ -88,50 +159,9 @@ void ThumbnailStrip::refreshLayout()
     if(c->isActive())
       numActive++;
 
-  // depending on overall aspect ratio, we either lay out the strip horizontally or
-  // vertically. This tries to account for whether the strip is docked along one side
-  // or another of the texture viewer
-  if(avail.width() > avail.height())
-  {
-    avail.setWidth(avail.width() + 6);    // controls implicitly have a 6 margin on the right
-
-    int aspectWidth = (int)((float)avail.height() * 1.3f);
-
-    ui->scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-
-    delete layout;
-    layout = new QHBoxLayout();
-    layout->setSpacing(6);
-    layout->setContentsMargins(6, 6, 6, 6);
-    layout->setAlignment(Qt::AlignTop);
-
-    int noscrollWidth = numActive * (aspectWidth + 20);
-
-    if(noscrollWidth <= avail.width())
-    {
-      ui->scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-
-      for(ResourcePreview *c : m_Thumbnails)
-        c->setSize(QSize(aspectWidth, avail.height()));
-    }
-    else
-    {
-      ui->scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
-
-      QScrollBar *hs = ui->scrollArea->horizontalScrollBar();
-
-      avail.setHeight(qMax(1, avail.height() - hs->geometry().height()));
-
-      aspectWidth = qMax(1, (int)((float)avail.height() * 1.3f));
-
-      int totalWidth = numActive * (aspectWidth + 20);
-      hs->setEnabled(totalWidth > avail.width());
-
-      for(ResourcePreview *c : m_Thumbnails)
-        c->setSize(QSize(aspectWidth, avail.height()));
-    }
-  }
-  else
+  // Inputs and Outputs are intentionally fixed to a vertical list. The old adaptive
+  // branch changed orientation when the dock area crossed its aspect-ratio threshold,
+  // which made resizing the main window unexpectedly change the interaction layout.
   {
     avail.setHeight(avail.height() + 6);    // controls implicitly have a 6 margin on the bottom
 
