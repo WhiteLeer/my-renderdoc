@@ -1,9 +1,11 @@
 set(sources
     renderdoccmd.cpp
+    shader_export.cpp
     renderdoccmd.h
+    shader_export.h
     3rdparty/cmdline/cmdline.h
     )
-set(includes PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty ${CMAKE_SOURCE_DIR}/renderdoc/api)
+set(includes PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty ${CMAKE_SOURCE_DIR}/renderdoc ${CMAKE_SOURCE_DIR}/renderdoc/api)
 set(libraries PRIVATE renderdoc)
 
 if(PythonLibs_FOUND)

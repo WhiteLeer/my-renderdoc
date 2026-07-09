@@ -25,6 +25,7 @@
 
 #include "renderdoccmd.h"
 #include "capture_variant.h"
+#include "shader_export.h"
 #include <app/renderdoc_app.h>
 #include <replay/version.h>
 #include <string>
@@ -1570,6 +1571,7 @@ int renderdoccmd(GlobalEnvironment &env, std::vector<std::string> &argv)
     add_command("thumb", new ThumbCommand());
     add_command("remoteserver", new RemoteServerCommand());
     add_command("replay", new ReplayCommand());
+    add_command("shader-export", CreateShaderExportCommand());
     add_command("capaltbit", new CapAltBitCommand());
     add_command("test", new TestCommand());
     add_command("convert", new ConvertCommand());
