@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RenderDoc UI Prototype</title>
+  <style>
+    :root { font-family: Inter, "Segoe UI", system-ui, sans-serif; color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 1020px; min-height: 720px; background: #11151b; color: #d8dee9; }
+    button, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    .shell { min-height: 100vh; padding-bottom: 76px; }
+    .prototype-note { position: fixed; z-index: 20; left: 18px; bottom: 17px; font-size: 11px; color: #98a2b3; opacity: .8; }
+    .switcher { position: fixed; z-index: 30; left: 50%; bottom: 13px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #3a4553; border-radius: 999px; background: #1b222c; box-shadow: 0 10px 30px #0008; }
+    .switcher button { width: 28px; height: 28px; border: 0; border-radius: 50%; background: #2b3542; }
+    .switcher button:hover { background: #4b84b8; }
+    .switcher select { border: 0; outline: 0; background: transparent; font-size: 12px; min-width: 170px; }
+    .topbar { height: 48px; display: flex; align-items: center; gap: 18px; padding: 0 16px; background: #1b222b; border-bottom: 1px solid #303944; }
+    .brand { font-weight: 700; letter-spacing: .02em; color: #eef3f8; }
+    .topbar nav { display: flex; gap: 14px; color: #9eabb9; font-size: 12px; }
+    .topbar nav span:first-child { color: #70b9ff; }
+    .topbar .grow { flex: 1; }
+    .capture { color: #aeb9c7; font-size: 12px; }
+    .main { height: calc(100vh - 48px); min-height: 600px; display: grid; grid-template-columns: 270px minmax(450px, 1fr) 310px; gap: 1px; background: #090b0e; }
+    .panel { min-width: 0; min-height: 0; background: #171c23; overflow: hidden; }
+    .panel-title { height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 0 11px; border-bottom: 1px solid #303944; color: #b9c5d3; font-size: 12px; font-weight: 600; }
+    .panel-title button { border: 0; background: transparent; color: #8d9aaa; }
+    .event-list { height: calc(100% - 34px); overflow: auto; padding: 5px 0; font: 12px/1.8 Consolas, monospace; }
+    .event { display: flex; gap: 8px; padding: 1px 10px; color: #9ca8b8; }
+    .event:hover { background: #27313d; }
+    .event.active { color: #fff; background: #28527a; }
+    .event .id { width: 45px; color: #657487; text-align: right; }
+    .viewer { display: flex; flex-direction: column; background: #0f1318; }
+    .tabs { display: flex; align-items: center; gap: 2px; height: 35px; padding: 0 8px; border-bottom: 1px solid #303944; background: #1a2028; }
+    .tab { height: 27px; display: flex; align-items: center; gap: 8px; padding: 0 11px; border-radius: 4px 4px 0 0; color: #97a4b3; font-size: 11px; }
+    .tab.active { color: #eef4fb; background: #303b49; }
+    .canvas { position: relative; flex: 1; display: grid; place-items: center; overflow: hidden; background: radial-gradient(circle at 50% 45%, #293a51 0, #141a22 38%, #0c1014 80%); }
+    .canvas::before { content: ""; position: absolute; inset: 0; opacity: .25; background-image: linear-gradient(#5b718733 1px, transparent 1px), linear-gradient(90deg, #5b718733 1px, transparent 1px); background-size: 24px 24px; }
+    .texture { position: relative; width: min(76%, 580px); aspect-ratio: 16/9; border: 1px solid #8fb9e888; box-shadow: 0 0 0 8px #0005, 0 25px 60px #0009; background: linear-gradient(135deg, #13253b, #4b79aa 45%, #e59e64 46%, #182b45 63%, #0e1725); }
+    .texture::before { content: "FRAME 3630"; position: absolute; left: 18px; top: 16px; font: 700 22px Consolas, monospace; color: #d8eeff88; letter-spacing: .1em; }
+    .texture::after { content: "R11G11B10_FLOAT"; position: absolute; right: 16px; bottom: 13px; font: 11px Consolas, monospace; color: #e7f1ff99; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 8px; border-top: 1px solid #303944; background: #1a2028; }
+    .toolbar-group { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 3px 7px; border: 1px solid #3a4655; border-radius: 4px; background: #202833; font-size: 11px; }
+    .toolbar-group label { color: #8f9dad; }
+    .toolbar button, .toolbar select { min-height: 24px; padding: 2px 8px; border: 1px solid #455367; border-radius: 3px; background: #2c3847; }
+    .toolbar button:hover, .toolbar select:hover { border-color: #75b5ed; }
+    .statusbar { height: 27px; display: flex; align-items: center; gap: 15px; padding: 0 10px; color: #8290a0; border-top: 1px solid #303944; font: 11px Consolas, monospace; }
+    .inputs { height: calc(100% - 34px); display: grid; grid-template-rows: 1fr 1fr; gap: 1px; background: #303944; }
+    .thumbs { min-height: 0; padding: 11px; background: #171c23; }
+    .thumb { height: 92px; display: grid; place-items: center; border: 1px solid #445267; background: linear-gradient(135deg, #263b56, #a07170, #1e2838); color: #dbe9f8aa; font: 11px Consolas, monospace; }
+    .props { padding: 11px; overflow: auto; font: 11px/1.8 Consolas, monospace; color: #9aa9ba; }
+    .props b { color: #cbd7e4; }
+
+    /* Qt Quick-like variant */
+    .quick { background: #10151e; color: #e7edf5; }
+    .quick .topbar { height: 64px; padding: 0 24px; background: #151d29; border: 0; }
+    .quick .brand { font-size: 15px; }
+    .quick .topbar nav { gap: 20px; }
+    .quick .main { height: calc(100vh - 64px); gap: 14px; padding: 14px; background: #10151e; grid-template-columns: 260px minmax(450px, 1fr) 300px; }
+    .quick .panel { border: 1px solid #293649; border-radius: 13px; background: #182130; box-shadow: 0 12px 35px #0003; }
+    .quick .panel-title { height: 45px; padding: 0 16px; border: 0; font-size: 12px; }
+    .quick .event-list, .quick .inputs { height: calc(100% - 45px); }
+    .quick .event { margin: 3px 7px; padding: 5px 8px; border-radius: 7px; }
+    .quick .event.active { background: #315d8e; }
+    .quick .viewer { border: 1px solid #293649; border-radius: 13px; }
+    .quick .tabs { height: 45px; padding: 0 13px; border: 0; background: #1a2535; }
+    .quick .tab { height: 31px; border-radius: 9px; }
+    .quick .tab.active { background: #385d87; }
+    .quick .canvas { background: radial-gradient(circle at 50% 45%, #365a7b, #15202e 50%, #10151e 85%); }
+    .quick .texture { border-radius: 12px; border-color: #8bc7ff99; box-shadow: 0 0 0 8px #10151e88, 0 24px 70px #000c; }
+    .quick .toolbar { gap: 8px; padding: 12px; border: 0; background: #1a2535; }
+    .quick .toolbar-group { min-height: 34px; padding: 4px 9px; border: 0; border-radius: 9px; background: #243248; }
+    .quick .toolbar button, .quick .toolbar select { border: 0; border-radius: 7px; background: #315274; }
+    .quick .statusbar { height: 34px; border: 0; background: #182130; }
+    .quick .thumbs { background: #182130; }
+    .quick .thumb { border: 0; border-radius: 10px; background: linear-gradient(135deg, #2e5479, #b27981, #243955); }
+
+    /* Dear ImGui-like variant */
+    .imgui { font-family: Tahoma, Arial, sans-serif; background: #242424; color: #e3e3e3; }
+    .imgui .topbar { height: 31px; padding: 0 7px; gap: 18px; background: #353535; border-bottom: 1px solid #111; }
+    .imgui .brand { font-size: 12px; }
+    .imgui .topbar nav { gap: 15px; color: #ddd; font-size: 11px; }
+    .imgui .main { height: calc(100vh - 31px); gap: 3px; background: #181818; grid-template-columns: 245px minmax(450px, 1fr) 280px; }
+    .imgui .panel { background: #2b2b2b; border: 1px solid #101010; }
+    .imgui .panel-title { height: 26px; padding: 0 7px; border-bottom: 1px solid #121212; background: linear-gradient(#454545, #303030); font-size: 11px; }
+    .imgui .event-list { height: calc(100% - 26px); font: 11px/1.5 Consolas, monospace; padding: 3px 0; }
+    .imgui .event { padding: 2px 6px; }
+    .imgui .event.active { background: #4b79a4; }
+    .imgui .viewer { border: 1px solid #101010; }
+    .imgui .tabs { height: 26px; padding: 0 3px; background: #242424; border-bottom: 1px solid #111; }
+    .imgui .tab { height: 23px; padding: 0 8px; border-radius: 3px 3px 0 0; font-size: 11px; }
+    .imgui .tab.active { background: #3d3d3d; }
+    .imgui .canvas { background: #1c1c1c; }
+    .imgui .canvas::before { opacity: .12; }
+    .imgui .texture { width: 70%; border: 1px solid #777; box-shadow: 0 0 0 1px #111; }
+    .imgui .toolbar { gap: 3px; padding: 4px; background: #303030; border-top: 1px solid #111; }
+    .imgui .toolbar-group { min-height: 25px; padding: 1px 4px; border: 1px solid #111; border-radius: 2px; background: #3a3a3a; }
+    .imgui .toolbar button, .imgui .toolbar select { min-height: 20px; padding: 1px 6px; border: 1px solid #151515; border-radius: 2px; background: #505050; font-size: 11px; }
+    .imgui .statusbar { height: 22px; background: #303030; border-top: 1px solid #111; }
+    .imgui .thumbs { background: #2b2b2b; }
+    .imgui .thumb { height: 80px; border: 1px solid #111; background: linear-gradient(135deg, #263b56, #a07170, #1e2838); }
+    .imgui .switcher { background: #3b3b3b; border-color: #111; }
+
+    @media (max-width: 1100px) {
+      body { min-width: 760px; }
+      .main, .quick .main, .imgui .main { grid-template-columns: 205px minmax(350px, 1fr) 230px; }
+      .topbar nav { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div class="prototype-note">PROTOTYPE — 仅用于比较 UI 方向，不是 RenderDoc 生产代码</div>
+  <div class="switcher">
+    <button id="prev" aria-label="上一个方案">‹</button>
+    <select id="variant">
+      <option value="widgets">Qt Widgets：当前方案</option>
+      <option value="quick">Qt Quick / QML：现代布局</option>
+      <option value="imgui">Dear ImGui：调试工具风格</option>
+    </select>
+    <button id="next" aria-label="下一个方案">›</button>
+  </div>
+  <script>
+    const variants = ['widgets', 'quick', 'imgui'];
+    const labels = { widgets: 'Qt Widgets：当前方案', quick: 'Qt Quick / QML：现代布局', imgui: 'Dear ImGui：调试工具风格' };
+    const app = document.getElementById('app');
+    const select = document.getElementById('variant');
+    const events = ['vkCmdBeginRenderPass', 'vkCmdBindPipeline (Graphics)', 'vkCmdBindDescriptorSets', 'vkCmdDrawIndexed (300, 1)', 'vkCmdDrawIndexed (66, 1)', 'vkCmdDrawIndexed (66, 1)', 'vkCmdDrawIndexed (300, 1)', 'vkCmdEndRenderPass'];
+    function render() {
+      const v = new URLSearchParams(location.search).get('variant') || 'widgets';
+      const variant = variants.includes(v) ? v : 'widgets';
+      select.value = variant;
+      app.className = variant;
+      app.innerHTML = `
+        <div class="shell ${variant}">
+          <header class="topbar"><div class="brand">RenderDoc <span style="color:#79b9ed">UI Prototype</span></div><nav><span>File</span><span>Window</span><span>Tools</span><span>Help</span></nav><div class="grow"></div><div class="capture">mumu-host_sr_frame3630.srrdc</div></header>
+          <main class="main">
+            <section class="panel"><div class="panel-title"><span>Event Browser</span><button>×</button></div><div class="event-list">${events.map((e, i) => `<div class="event ${i === 3 ? 'active' : ''}" data-event="${i}"><span class="id">${782 + i * 13}</span><span>${e}</span></div>`).join('')}</div></section>
+            <section class="viewer"><div class="tabs"><div class="tab active">Texture Viewer <span>×</span></div><div class="tab">Mesh Viewer</div><div class="tab">Pipeline State</div><div class="grow"></div><button style="background:transparent;border:0;color:#9ca8b8">☰</button></div><div class="canvas"><div class="texture"></div></div><div class="toolbar"><div class="toolbar-group"><label>Channels</label><select><option>RGBA</option><option>RGB</option><option>R</option></select></div><div class="toolbar-group"><label>Zoom</label><button>Fit</button><select><option>27%</option><option>50%</option><option>100%</option></select></div><div class="toolbar-group"><label>Overlay</label><select><option>None</option><option>Wireframe</option><option>Depth</option></select></div><div class="toolbar-group"><label>Range</label><button>0.00 — 1.00</button></div></div><div class="statusbar"><span>2D Color Attachment 26010</span><span>1920×1080</span><span>R11G11B10_FLOAT</span><span style="margin-left:auto">Hover 40, 54</span></div></section>
+            <section class="panel"><div class="panel-title"><span>Inputs / Outputs</span><button>×</button></div><div class="inputs"><div class="thumbs"><div style="color:#9ca8b8;font-size:11px;margin-bottom:8px">Inputs</div><div class="thumb">FS 0 — res62</div><div class="thumb" style="margin-top:8px">FS 1 — res63</div></div><div class="thumbs"><div style="color:#9ca8b8;font-size:11px;margin-bottom:8px">Pixel Context</div><div class="props"><b>Draw:</b> vkCmdDrawIndexed<br><b>Index count:</b> 300<br><b>Instance count:</b> 1<br><b>Depth test:</b> Enabled<br><b>Blend:</b> Disabled</div></div></div></section>
+          </main>
+        </div>`;
+      app.querySelectorAll('[data-event]').forEach(el => el.addEventListener('click', () => { app.querySelectorAll('.event').forEach(x => x.classList.remove('active')); el.classList.add('active'); }));
+    }
+    function setVariant(v) { history.replaceState(null, '', '?variant=' + v); render(); }
+    select.addEventListener('change', e => setVariant(e.target.value));
+    document.getElementById('prev').addEventListener('click', () => { const i = variants.indexOf(select.value); setVariant(variants[(i + variants.length - 1) % variants.length]); });
+    document.getElementById('next').addEventListener('click', () => { const i = variants.indexOf(select.value); setVariant(variants[(i + 1) % variants.length]); });
+    document.addEventListener('keydown', e => { if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) return; if (e.key === 'ArrowLeft') document.getElementById('prev').click(); if (e.key === 'ArrowRight') document.getElementById('next').click(); });
+    render();
+  </script>
+</body>
+</html>
