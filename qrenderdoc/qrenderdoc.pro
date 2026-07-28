@@ -6,6 +6,10 @@
 
 QT       += core gui widgets svg network
 
+qmlui {
+	QT += quick quickwidgets
+}
+
 CONFIG   += silent
 
 lessThan(QT_MAJOR_VERSION, 5): error("requires Qt 5.6; found $$[QT_VERSION]")
