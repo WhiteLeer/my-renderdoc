@@ -27,6 +27,7 @@
 #include "driver/dxgi/dxgi_wrapped.h"
 #include "hooks/hooks.h"
 #include "d3d11_device.h"
+#include "os/win32/sr44_diagnostics.h"
 
 ID3DDevice *GetD3D11DeviceIfAlloc(IUnknown *dev)
 {
@@ -161,10 +162,13 @@ private:
     if(suppress)
     {
       RDCLOG("Application requested not to be hooked.");
+      LogSR44LaunchStage("d3d11_create_device",
+                         "application requested PREVENT_ALTERING_LAYER_SETTINGS_FROM_REGISTRY");
     }
     else if(SUCCEEDED(ret) && ppDevice)
     {
       RDCDEBUG("succeeded and hooking.");
+      LogSR44LaunchStage("d3d11_create_device", "device creation succeeded; wrapping device");
 
       if(!WrappedID3D11Device::IsAlloc(*ppDevice))
       {
@@ -192,10 +196,13 @@ private:
     else if(SUCCEEDED(ret))
     {
       RDCLOG("Created wrapped D3D11 device.");
+      LogSR44LaunchStage("d3d11_create_device", "device creation succeeded without device pointer");
     }
     else
     {
       RDCDEBUG("failed. HRESULT: %s", ToStr(ret).c_str());
+      LogSR44LaunchStage("d3d11_create_device",
+                         StringFormat::Fmt("failed hr=%s", ToStr(ret).c_str()).c_str());
     }
 
     EndRecurse();
