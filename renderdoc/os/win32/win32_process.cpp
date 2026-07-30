@@ -32,14 +32,138 @@
 #include "common/formatting.h"
 #include "core/core.h"
 #include "os/os_specific.h"
+#include "os/win32/sr44_diagnostics.h"
 #include "strings/string_utils.h"
 
+#include <fstream>
 #include <string>
 
 static rdcarray<EnvironmentModification> &GetEnvModifications()
 {
   static rdcarray<EnvironmentModification> envCallbacks;
   return envCallbacks;
+}
+
+static bool IsSR44LaunchDiagnosticsEnabled()
+{
+  char value[16] = {};
+  DWORD len = GetEnvironmentVariableA("RENDERTEST_SR44_LAUNCH_DIAGNOSTICS", value,
+                                     sizeof(value));
+
+  if(len == 0 || len >= sizeof(value))
+    return false;
+
+  return value[0] == '1' || value[0] == 'y' || value[0] == 'Y' || value[0] == 't' ||
+         value[0] == 'T';
+}
+
+static DWORD GetSR44LaunchObservationMilliseconds()
+{
+  char value[32] = {};
+  DWORD len = GetEnvironmentVariableA("RENDERTEST_SR44_LAUNCH_OBSERVE_MS", value,
+                                     sizeof(value));
+  if(len == 0 || len >= sizeof(value))
+    return 10000;
+
+  char *end = NULL;
+  unsigned long parsed = strtoul(value, &end, 10);
+  if(end == value || *end != 0)
+    return 10000;
+
+  return (DWORD)parsed;
+}
+
+static std::string JsonEscape(const char *value)
+{
+  std::string escaped;
+
+  if(value == NULL)
+    return escaped;
+
+  for(const unsigned char *p = (const unsigned char *)value; *p != 0; ++p)
+  {
+    switch(*p)
+    {
+      case '\\': escaped += "\\\\"; break;
+      case '"': escaped += "\\\""; break;
+      case '\n': escaped += "\\n"; break;
+      case '\r': escaped += "\\r"; break;
+      case '\t': escaped += "\\t"; break;
+      default:
+        if(*p < 0x20)
+        {
+          char control[7] = {};
+          snprintf(control, sizeof(control), "\\u%04x", (unsigned int)*p);
+          escaped += control;
+        }
+        else
+        {
+          escaped += (char)*p;
+        }
+        break;
+    }
+  }
+
+  return escaped;
+}
+
+static DWORD g_SR44DiagnosticTargetPid = 0;
+
+static void LogSR44LaunchJson(const char *stage, const char *details, DWORD targetPid = 0,
+                              DWORD processExitCode = STILL_ACTIVE)
+{
+  rdcstr jsonfile = Process::GetEnvVariable("RENDERTEST_SR44_LAUNCH_JSONL");
+  if(jsonfile.empty())
+    return;
+
+  SYSTEMTIME now = {};
+  GetSystemTime(&now);
+
+  std::ofstream output(jsonfile.c_str(), std::ios::out | std::ios::app);
+  if(!output)
+    return;
+
+  output << "{\"timestamp_utc\":\"" << StringFormat::Fmt(
+                "%04u-%02u-%02uT%02u:%02u:%02u.%03uZ", now.wYear, now.wMonth, now.wDay,
+                now.wHour, now.wMinute, now.wSecond, now.wMilliseconds)
+                .c_str()
+         << "\",\"logger_pid\":" << GetCurrentProcessId() << ",\"target_pid\":"
+         << (targetPid != 0 ? targetPid : g_SR44DiagnosticTargetPid) << ",\"tick\":"
+         << GetTickCount64() << ",\"stage\":\""
+         << JsonEscape(stage) << "\",\"details\":\"" << JsonEscape(details)
+         << "\",\"process_exit_code\":";
+
+  if(processExitCode == STILL_ACTIVE)
+    output << "null";
+  else
+    output << processExitCode;
+
+  output << "}\n";
+}
+
+void LogSR44LaunchStage(const char *stage, const char *details)
+{
+  if(!IsSR44LaunchDiagnosticsEnabled())
+    return;
+
+  RDCLOG("[SR-4.4 launch] %s: %s (tick=%llu)", stage, details,
+         (unsigned long long)GetTickCount64());
+  LogSR44LaunchJson(stage, details);
+}
+
+static void ConfigureSR44LaunchDiagnostics()
+{
+  if(!IsSR44LaunchDiagnosticsEnabled())
+    return;
+
+  rdcstr logfile = Process::GetEnvVariable("RENDERTEST_SR44_LAUNCH_LOG");
+  if(!logfile.empty())
+    RDCLOGFILE(logfile.c_str());
+
+  RDCLOGOUTPUT();
+
+  LogSR44LaunchStage("diagnostics", logfile.empty() ? "enabled without explicit log file"
+                                                      : logfile.c_str());
 }
 
 struct InsensitiveComparison
@@ -249,7 +373,10 @@ extern "C" __declspec(dllexport) void __cdecl INTERNAL_ApplyEnvMods(void *ignore
   Process::ApplyEnvironmentModification();
 }
 
-rdcstr InjectDLL(HANDLE hProcess, rdcwstr libName)
+// Forward declaration (used by SetThreadContext path inside InjectDLL)
+uintptr_t FindRemoteDLL(DWORD pid, rdcstr libName);
+
+rdcstr InjectDLL(HANDLE hProcess, rdcwstr libName, HANDLE hPrimaryThread = NULL)
 {
   wchar_t dllPath[MAX_PATH + 1] = {0};
   wcscpy_s(dllPath, libName.c_str());
@@ -262,73 +389,273 @@ rdcstr InjectDLL(HANDLE hProcess, rdcwstr libName)
     return StringFormat::Fmt("Couldn't get handle for kernel32.dll: %u", err);
   }
 
+  FARPROC pLoadLibraryW = GetProcAddress(kernel32, "LoadLibraryW");
+  if(pLoadLibraryW == NULL)
+  {
+    DWORD err = GetLastError();
+    return StringFormat::Fmt("Couldn't get LoadLibraryW address: %u", err);
+  }
+
   void *remoteMem =
       VirtualAllocEx(hProcess, NULL, sizeof(dllPath), MEM_COMMIT, PAGE_READWRITE);
-  if(remoteMem)
+  if(!remoteMem)
   {
-    BOOL success = WriteProcessMemory(hProcess, remoteMem, (void *)dllPath, sizeof(dllPath), NULL);
-    if(success)
+    DWORD err = GetLastError();
+    if(IsSR44LaunchDiagnosticsEnabled())
+      LogSR44LaunchStage("VirtualAllocEx failed",
+                         StringFormat::Fmt("pid=%lu dll='%ls' size=%zu error=%lu",
+                                            (unsigned long)GetProcessId(hProcess), libName.c_str(),
+                                            sizeof(dllPath), (unsigned long)err)
+                             .c_str());
+
+    return StringFormat::Fmt("Couldn't allocate remote memory for DLL '%ls': %u", libName.c_str(),
+                             err);
+  }
+
+  BOOL success = WriteProcessMemory(hProcess, remoteMem, (void *)dllPath, sizeof(dllPath), NULL);
+  if(!success)
+  {
+    DWORD err = GetLastError();
+    VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+    return StringFormat::Fmt("Couldn't write remote memory %p with dllPath '%ls': %u", remoteMem,
+                             dllPath, err);
+  }
+
+  // Scheme A: when we have the primary thread from CREATE_SUSPENDED, use SetThreadContext
+  // with a stub + dedicated remote stack so the real thread stack is never touched.
+  if(hPrimaryThread != NULL)
+  {
+#if ENABLED(RDOC_X64)
+    CONTEXT saved = {};
+    saved.ContextFlags = CONTEXT_FULL;
+    if(!GetThreadContext(hPrimaryThread, &saved))
     {
-      HANDLE hThread = CreateRemoteThread(
-          hProcess, NULL, 1024 * 1024U,
-          (LPTHREAD_START_ROUTINE)GetProcAddress(kernel32, "LoadLibraryW"), remoteMem, 0, NULL);
-      if(hThread)
+      DWORD err = GetLastError();
+      VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+      return StringFormat::Fmt("GetThreadContext failed: %u", err);
+    }
+
+    // Remote block: [done:4][pad:4][stub]
+    // Stub calls LoadLibraryW(path), sets done=1, spins.
+    // sub rsp, 0x20 (not 0x28): with RSP 16-byte aligned, after `call` the callee
+    // sees RSP ≡ 8 (mod 16) as required by the Windows x64 ABI.
+    unsigned char stub[] = {
+        0x48, 0x83, 0xEC, 0x20,                             // sub rsp, 0x20
+        0x48, 0xB9, 0, 0, 0, 0, 0, 0, 0, 0,                 // mov rcx, path
+        0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0,                 // mov rax, LoadLibraryW
+        0xFF, 0xD0,                                         // call rax
+        0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0,                 // mov rax, done
+        0xC7, 0x00, 0x01, 0x00, 0x00, 0x00,                 // mov dword [rax], 1
+        0xEB, 0xFE,                                         // jmp $
+    };
+
+    const size_t codeSize = sizeof(stub);
+    const size_t blockSize = 8 + codeSize;
+    void *codeMem =
+        VirtualAllocEx(hProcess, NULL, blockSize, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+    if(!codeMem)
+    {
+      VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+      return StringFormat::Fmt("Couldn't allocate LoadLibrary stub: %u", GetLastError());
+    }
+
+    const size_t remoteStackSize = 64 * 1024;
+    void *remoteStack =
+        VirtualAllocEx(hProcess, NULL, remoteStackSize, MEM_COMMIT, PAGE_READWRITE);
+    if(!remoteStack)
+    {
+      VirtualFreeEx(hProcess, codeMem, 0, MEM_RELEASE);
+      VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+      return StringFormat::Fmt("Couldn't allocate LoadLibrary remote stack: %u", GetLastError());
+    }
+
+    const uint64_t pathAddr = (uint64_t)(uintptr_t)remoteMem;
+    const uint64_t doneAddr = (uint64_t)(uintptr_t)codeMem;
+    const uint64_t stubAddr = doneAddr + 8;
+    const uint64_t loadAddr = (uint64_t)(uintptr_t)pLoadLibraryW;
+
+    memcpy(stub + 6, &pathAddr, 8);
+    memcpy(stub + 16, &loadAddr, 8);
+    memcpy(stub + 28, &doneAddr, 8);
+
+    unsigned char block[8 + sizeof(stub)] = {};
+    memcpy(block + 8, stub, sizeof(stub));
+    if(!WriteProcessMemory(hProcess, codeMem, block, sizeof(block), NULL))
+    {
+      DWORD err = GetLastError();
+      VirtualFreeEx(hProcess, remoteStack, 0, MEM_RELEASE);
+      VirtualFreeEx(hProcess, codeMem, 0, MEM_RELEASE);
+      VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+      return StringFormat::Fmt("Couldn't write LoadLibrary stub: %u", err);
+    }
+
+    CONTEXT ctx = saved;
+    ctx.Rip = stubAddr;
+    ctx.Rsp = ((uint64_t)(uintptr_t)remoteStack + remoteStackSize) & ~0xFull;
+
+    if(!SetThreadContext(hPrimaryThread, &ctx))
+    {
+      DWORD err = GetLastError();
+      VirtualFreeEx(hProcess, remoteStack, 0, MEM_RELEASE);
+      VirtualFreeEx(hProcess, codeMem, 0, MEM_RELEASE);
+      VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+      return StringFormat::Fmt("SetThreadContext failed: %u", err);
+    }
+
+    if(IsSR44LaunchDiagnosticsEnabled())
+      LogSR44LaunchStage("SetThreadContext", "LoadLibraryW stub + remote stack dispatched");
+
+    SetLastError(ERROR_SUCCESS);
+    DWORD resumeRet = ResumeThread(hPrimaryThread);
+    DWORD resumeErr = GetLastError();
+    if(IsSR44LaunchDiagnosticsEnabled())
+      LogSR44LaunchStage("SetThreadContext ResumeThread",
+                         StringFormat::Fmt("return=%lu lastError=%lu", (unsigned long)resumeRet,
+                                            (unsigned long)resumeErr)
+                             .c_str());
+
+    if(resumeRet == (DWORD)-1)
+    {
+      SetThreadContext(hPrimaryThread, &saved);
+      VirtualFreeEx(hProcess, remoteStack, 0, MEM_RELEASE);
+      VirtualFreeEx(hProcess, codeMem, 0, MEM_RELEASE);
+      VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+      return StringFormat::Fmt("ResumeThread after SetThreadContext failed: %u", resumeErr);
+    }
+
+    // Prefer polling the done flag; also accept module appearance as success.
+    DWORD pid = GetProcessId(hProcess);
+    const char *rdoc_dll_name = STRINGIZE(RDOC_BASE_NAME) ".dll";
+    uintptr_t loc = 0;
+    const DWORD pollTimeoutMs = 10000;
+    const DWORD pollIntervalMs = 20;
+    DWORD waited = 0;
+    uint32_t done = 0;
+
+    // MUST wait for done==1. Breaking on module presence alone can suspend the thread while
+    // still inside LoadLibrary/DllMain (loader lock held) → process deadlocks after final Resume
+    // and never shows a window.
+    while(waited < pollTimeoutMs)
+    {
+      SIZE_T nr = 0;
+      if(ReadProcessMemory(hProcess, codeMem, &done, sizeof(done), &nr) && nr == sizeof(done) &&
+         done == 1)
       {
-        DWORD waitResult = WaitForSingleObject(hThread, INFINITE);
-        DWORD waitError = waitResult == WAIT_FAILED ? GetLastError() : ERROR_SUCCESS;
-        DWORD loadResult = 0;
-        BOOL gotExitCode = FALSE;
-        DWORD exitCodeError = ERROR_SUCCESS;
+        loc = FindRemoteDLL(pid, rdoc_dll_name);
+        break;
+      }
 
-        if(waitResult == WAIT_OBJECT_0)
+      DWORD exitCode = 0;
+      if(GetExitCodeProcess(hProcess, &exitCode))
+      {
+        if(IsSR44LaunchDiagnosticsEnabled())
+          LogSR44LaunchStage("poll exit code",
+                             StringFormat::Fmt("pid=%lu exit=%lu waited=%u done=%u",
+                                                (unsigned long)pid, (unsigned long)exitCode,
+                                                (unsigned)waited, (unsigned)done)
+                                 .c_str());
+
+        if(exitCode != STILL_ACTIVE)
         {
-          gotExitCode = GetExitCodeThread(hThread, &loadResult);
-          if(!gotExitCode)
-            exitCodeError = GetLastError();
-        }
-
-        CloseHandle(hThread);
-
-        if(waitResult != WAIT_OBJECT_0)
-        {
+          VirtualFreeEx(hProcess, remoteStack, 0, MEM_RELEASE);
+          VirtualFreeEx(hProcess, codeMem, 0, MEM_RELEASE);
           VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
-          return StringFormat::Fmt("Waiting for remote LoadLibraryW failed: wait=0x%08x error=%u",
-                                   waitResult, waitError);
-        }
-
-        if(!gotExitCode)
-        {
-          VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
-          return StringFormat::Fmt("Couldn't read remote LoadLibraryW result: %u", exitCodeError);
-        }
-
-        if(loadResult == 0)
-        {
-          VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
-          return StringFormat::Fmt("Remote LoadLibraryW returned NULL for '%ls'", dllPath);
+          return StringFormat::Fmt("Target process exited during SetThreadContext LoadLibrary "
+                                   "(code=%lu) before stub completed",
+                                   (unsigned long)exitCode);
         }
       }
-      else
+
+      Sleep(pollIntervalMs);
+      waited += pollIntervalMs;
+    }
+
+    // Re-suspend and fully restore original context (no stack damage)
+    SuspendThread(hPrimaryThread);
+    SetThreadContext(hPrimaryThread, &saved);
+
+    if(loc == 0)
+      loc = FindRemoteDLL(pid, rdoc_dll_name);
+
+    if(IsSR44LaunchDiagnosticsEnabled())
+      LogSR44LaunchStage("SetThreadContext re-SuspendThread",
+                         StringFormat::Fmt("loc=0x%llx waited=%lu done=%u",
+                                            (unsigned long long)loc, (unsigned long)waited,
+                                            (unsigned)done)
+                             .c_str());
+
+    VirtualFreeEx(hProcess, remoteStack, 0, MEM_RELEASE);
+    VirtualFreeEx(hProcess, codeMem, 0, MEM_RELEASE);
+    VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+
+    if(done != 1)
+    {
+      return StringFormat::Fmt("SetThreadContext LoadLibraryW stub did not signal done after %lu ms "
+                               "(loc=0x%llx). Refusing to continue to avoid loader-lock deadlock.",
+                               (unsigned long)pollTimeoutMs, (unsigned long long)loc);
+    }
+
+    if(loc == 0)
+    {
+      return StringFormat::Fmt("SetThreadContext LoadLibraryW completed but module '%s' not found",
+                               rdoc_dll_name);
+    }
+
+    return {};
+#else
+    VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+    return rdcstr("SetThreadContext LoadLibrary path not implemented for 32-bit");
+#endif
+  }
+
+  // Fallback / Attach path: classic CreateRemoteThread
+  {
+    HANDLE hThread = CreateRemoteThread(
+        hProcess, NULL, 1024 * 1024U, (LPTHREAD_START_ROUTINE)pLoadLibraryW, remoteMem, 0, NULL);
+    if(hThread)
+    {
+      DWORD waitResult = WaitForSingleObject(hThread, INFINITE);
+      DWORD waitError = waitResult == WAIT_FAILED ? GetLastError() : ERROR_SUCCESS;
+      DWORD loadResult = 0;
+      BOOL gotExitCode = FALSE;
+      DWORD exitCodeError = ERROR_SUCCESS;
+
+      if(waitResult == WAIT_OBJECT_0)
       {
-        DWORD err = GetLastError();
+        gotExitCode = GetExitCodeThread(hThread, &loadResult);
+        if(!gotExitCode)
+          exitCodeError = GetLastError();
+      }
+
+      CloseHandle(hThread);
+
+      if(waitResult != WAIT_OBJECT_0)
+      {
         VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
-        return StringFormat::Fmt("Couldn't create remote thread for LoadLibraryW: %u", err);
+        return StringFormat::Fmt("Waiting for remote LoadLibraryW failed: wait=0x%08x error=%u",
+                                 waitResult, waitError);
+      }
+
+      if(!gotExitCode)
+      {
+        VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+        return StringFormat::Fmt("Couldn't read remote LoadLibraryW result: %u", exitCodeError);
+      }
+
+      if(loadResult == 0)
+      {
+        VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+        return StringFormat::Fmt("Remote LoadLibraryW returned NULL for '%ls'", dllPath);
       }
     }
     else
     {
       DWORD err = GetLastError();
       VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
-      return StringFormat::Fmt("Couldn't write remote memory %p with dllPath '%ls': %u", remoteMem,
-                               dllPath, err);
+      return StringFormat::Fmt("Couldn't create remote thread for LoadLibraryW: %u", err);
     }
 
     VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
-  }
-  else
-  {
-    return StringFormat::Fmt("Couldn't allocate remote memory for DLL '%ls': %u", libName.c_str(),
-                             GetLastError());
   }
 
   return {};
@@ -436,13 +763,19 @@ uintptr_t FindRemoteDLL(DWORD pid, rdcstr libName)
   return ret;
 }
 
-void InjectFunctionCall(HANDLE hProcess, uintptr_t renderdoc_remote, const char *funcName,
-                        void *data, const size_t dataLen)
+bool InjectFunctionCall(HANDLE hProcess, uintptr_t renderdoc_remote, const char *funcName,
+                        void *data, const size_t dataLen, HANDLE hPrimaryThread = NULL)
 {
   if(dataLen == 0)
   {
     RDCERR("Invalid function call injection attempt");
-    return;
+    return false;
+  }
+
+  if(hProcess == NULL)
+  {
+    RDCERR("Invalid process handle for injected call to %s", funcName);
+    return false;
   }
 
   RDCDEBUG("Injecting call to %s", funcName);
@@ -451,23 +784,278 @@ void InjectFunctionCall(HANDLE hProcess, uintptr_t renderdoc_remote, const char 
 
   uintptr_t func_local = (uintptr_t)GetProcAddress(renderdoc_local, funcName);
 
-  // we've found SetCaptureOptions in our local instance of the module, now calculate the offset and
-  // so get the function
-  // in the remote module (which might be loaded at a different base address
+  if(func_local == 0 || renderdoc_remote == 0)
+  {
+    RDCERR("Couldn't resolve injected function %s (local=%p remote=%p)", funcName,
+           (void *)func_local, (void *)renderdoc_remote);
+    return false;
+  }
+
+  // we've found the export in our local instance of the module, now calculate the offset and
+  // so get the function in the remote module (which might be loaded at a different base address)
   uintptr_t func_remote = func_local + renderdoc_remote - (uintptr_t)renderdoc_local;
 
+  // Scheme A path: hijack the suspended primary thread with a small stub that calls the target
+  // function, writes a completion flag, then spins. We poll the flag, re-suspend, and restore
+  // the original context so subsequent calls / final Resume still work.
+  if(hPrimaryThread != NULL)
+  {
+#if ENABLED(RDOC_X64)
+    // Layout: [dataLen bytes payload] [8-byte aligned done flag] [shellcode]
+    const size_t doneOffset = (dataLen + 7) & ~(size_t)7;
+    const size_t codeOffset = doneOffset + 8;
+
+    // x64 stub:
+    //   sub rsp, 0x20   (shadow space; keeps 16-byte alignment for call)
+    //   mov rcx, <data>
+    //   mov rax, <func>
+    //   call rax
+    //   mov rax, <done>
+    //   mov dword [rax], 1
+    //   jmp $
+    unsigned char stub[] = {
+        0x48, 0x83, 0xEC, 0x20,                                     // sub rsp, 0x20
+        0x48, 0xB9, 0, 0, 0, 0, 0, 0, 0, 0,                         // mov rcx, imm64
+        0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0,                         // mov rax, imm64
+        0xFF, 0xD0,                                                 // call rax
+        0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0,                         // mov rax, imm64
+        0xC7, 0x00, 0x01, 0x00, 0x00, 0x00,                         // mov dword [rax], 1
+        0xEB, 0xFE,                                                 // jmp $
+    };
+    const size_t totalSize = codeOffset + sizeof(stub);
+
+    void *remoteMem =
+        VirtualAllocEx(hProcess, NULL, totalSize, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+    if(remoteMem == NULL)
+    {
+      RDCERR("Couldn't allocate remote memory for SetThreadContext call %s: %lu", funcName,
+             (unsigned long)GetLastError());
+      return false;
+    }
+
+    // Dedicated remote stack so we never clobber the real thread stack (avoids 0xC0000409 /GS).
+    const size_t remoteStackSize = 64 * 1024;
+    void *remoteStack =
+        VirtualAllocEx(hProcess, NULL, remoteStackSize, MEM_COMMIT, PAGE_READWRITE);
+    if(remoteStack == NULL)
+    {
+      RDCERR("Couldn't allocate remote stack for %s: %lu", funcName,
+             (unsigned long)GetLastError());
+      VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+      return false;
+    }
+
+    // Patch absolute addresses into the stub
+    const uint64_t remoteData = (uint64_t)(uintptr_t)remoteMem;
+    const uint64_t remoteDone = remoteData + doneOffset;
+    const uint64_t remoteCode = remoteData + codeOffset;
+    const uint64_t remoteFunc = (uint64_t)func_remote;
+
+    memcpy(stub + 6, &remoteData, 8);
+    memcpy(stub + 16, &remoteFunc, 8);
+    memcpy(stub + 28, &remoteDone, 8);
+
+    // Write payload (zero-fill the gap + done flag), then stub
+    rdcarray<byte> block;
+    block.resize(totalSize);
+    memset(block.data(), 0, totalSize);
+    memcpy(block.data(), data, dataLen);
+    memcpy(block.data() + codeOffset, stub, sizeof(stub));
+
+    SIZE_T numWritten = 0;
+    if(!WriteProcessMemory(hProcess, remoteMem, block.data(), totalSize, &numWritten) ||
+       numWritten != totalSize)
+    {
+      DWORD err = GetLastError();
+      RDCERR("Couldn't write remote stub for %s: %lu", funcName, (unsigned long)err);
+      VirtualFreeEx(hProcess, remoteStack, 0, MEM_RELEASE);
+      VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+      return false;
+    }
+
+    CONTEXT saved = {};
+    saved.ContextFlags = CONTEXT_FULL;
+    if(!GetThreadContext(hPrimaryThread, &saved))
+    {
+      RDCERR("GetThreadContext failed for %s: %lu", funcName, (unsigned long)GetLastError());
+      VirtualFreeEx(hProcess, remoteStack, 0, MEM_RELEASE);
+      VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+      return false;
+    }
+
+    CONTEXT ctx = saved;
+    ctx.Rip = remoteCode;
+    // Point RSP at the top of the dedicated remote stack (16-byte aligned).
+    // Stub does sub rsp, 0x20 for shadow space; original thread stack is untouched.
+    ctx.Rsp = ((uint64_t)(uintptr_t)remoteStack + remoteStackSize) & ~0xFull;
+
+    if(!SetThreadContext(hPrimaryThread, &ctx))
+    {
+      RDCERR("SetThreadContext failed for %s: %lu", funcName, (unsigned long)GetLastError());
+      VirtualFreeEx(hProcess, remoteStack, 0, MEM_RELEASE);
+      VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+      return false;
+    }
+
+    if(IsSR44LaunchDiagnosticsEnabled())
+      LogSR44LaunchStage(funcName, "SetThreadContext stub dispatched (remote stack)");
+
+    SetLastError(ERROR_SUCCESS);
+    DWORD resumeRet = ResumeThread(hPrimaryThread);
+    if(resumeRet == (DWORD)-1)
+    {
+      RDCERR("ResumeThread failed for %s: %lu", funcName, (unsigned long)GetLastError());
+      SetThreadContext(hPrimaryThread, &saved);
+      VirtualFreeEx(hProcess, remoteStack, 0, MEM_RELEASE);
+      VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+      return false;
+    }
+
+    // Poll completion flag
+    const DWORD pollTimeoutMs = 10000;
+    const DWORD pollIntervalMs = 10;
+    DWORD waited = 0;
+    uint32_t done = 0;
+    bool completed = false;
+
+    while(waited < pollTimeoutMs)
+    {
+      SIZE_T numRead = 0;
+      if(ReadProcessMemory(hProcess, (LPCVOID)(uintptr_t)remoteDone, &done, sizeof(done),
+                           &numRead) &&
+         numRead == sizeof(done) && done == 1)
+      {
+        completed = true;
+        break;
+      }
+
+      DWORD exitCode = 0;
+      if(GetExitCodeProcess(hProcess, &exitCode) && exitCode != STILL_ACTIVE)
+      {
+        RDCERR("Target exited during injected call %s (code=%lu)", funcName,
+               (unsigned long)exitCode);
+        VirtualFreeEx(hProcess, remoteStack, 0, MEM_RELEASE);
+        VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+        return false;
+      }
+
+      Sleep(pollIntervalMs);
+      waited += pollIntervalMs;
+    }
+
+    // Re-suspend and restore original context (registers + original stack pointer)
+    SuspendThread(hPrimaryThread);
+    SetThreadContext(hPrimaryThread, &saved);
+
+    if(IsSR44LaunchDiagnosticsEnabled())
+      LogSR44LaunchStage(funcName, completed ? StringFormat::Fmt("completed waited=%lu",
+                                                                   (unsigned long)waited)
+                                                   .c_str()
+                                             : StringFormat::Fmt("TIMEOUT waited=%lu",
+                                                                   (unsigned long)waited)
+                                                   .c_str());
+
+    if(!completed)
+    {
+      RDCERR("SetThreadContext call %s timed out after %lu ms", funcName,
+             (unsigned long)pollTimeoutMs);
+      VirtualFreeEx(hProcess, remoteStack, 0, MEM_RELEASE);
+      VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+      return false;
+    }
+
+    // Read back possibly-modified payload
+    SIZE_T numRead = 0;
+    if(!ReadProcessMemory(hProcess, remoteMem, data, dataLen, &numRead) || numRead != dataLen)
+    {
+      RDCERR("Couldn't read remote memory after %s: %lu", funcName,
+             (unsigned long)GetLastError());
+      VirtualFreeEx(hProcess, remoteStack, 0, MEM_RELEASE);
+      VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+      return false;
+    }
+
+    VirtualFreeEx(hProcess, remoteStack, 0, MEM_RELEASE);
+    VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+    RDCDEBUG("Injected call %s completed via SetThreadContext", funcName);
+    return true;
+#else
+    // 32-bit SetThreadContext path not implemented here; fall through to CreateRemoteThread
+    RDCWARN("SetThreadContext InjectFunctionCall not implemented for 32-bit, falling back");
+#endif
+  }
+
+  // Fallback / Attach path: classic CreateRemoteThread
   void *remoteMem = VirtualAllocEx(hProcess, NULL, dataLen, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
-  SIZE_T numWritten;
-  WriteProcessMemory(hProcess, remoteMem, data, dataLen, &numWritten);
+  if(remoteMem == NULL)
+  {
+    RDCERR("Couldn't allocate remote memory for injected call %s: %lu", funcName,
+           (unsigned long)GetLastError());
+    return false;
+  }
+
+  SIZE_T numWritten = 0;
+  if(!WriteProcessMemory(hProcess, remoteMem, data, dataLen, &numWritten) || numWritten != dataLen)
+  {
+    DWORD err = GetLastError();
+    RDCERR("Couldn't write remote memory for injected call %s: %lu (%llu/%llu bytes)", funcName,
+           (unsigned long)err, (unsigned long long)numWritten, (unsigned long long)dataLen);
+    VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+    return false;
+  }
 
   HANDLE hThread =
       CreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)func_remote, remoteMem, 0, NULL);
-  WaitForSingleObject(hThread, INFINITE);
+  if(hThread == NULL)
+  {
+    RDCERR("Couldn't create remote thread for injected call %s: %lu", funcName,
+           (unsigned long)GetLastError());
+    VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+    return false;
+  }
 
-  ReadProcessMemory(hProcess, remoteMem, data, dataLen, &numWritten);
+  DWORD waitResult = WaitForSingleObject(hThread, INFINITE);
+  if(waitResult != WAIT_OBJECT_0)
+  {
+    RDCERR("Couldn't wait for injected call %s: result %lu error %lu", funcName,
+           (unsigned long)waitResult, (unsigned long)GetLastError());
+    CloseHandle(hThread);
+    VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+    return false;
+  }
+
+  DWORD threadExitCode = 0;
+  if(!GetExitCodeThread(hThread, &threadExitCode))
+  {
+    RDCERR("Couldn't get exit code for injected call %s: %lu", funcName,
+           (unsigned long)GetLastError());
+    CloseHandle(hThread);
+    VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+    return false;
+  }
+
+  SIZE_T numRead = 0;
+  if(!ReadProcessMemory(hProcess, remoteMem, data, dataLen, &numRead) || numRead != dataLen)
+  {
+    DWORD err = GetLastError();
+    RDCERR("Couldn't read remote memory for injected call %s: %lu (%llu/%llu bytes)", funcName,
+           (unsigned long)err, (unsigned long long)numRead, (unsigned long long)dataLen);
+    CloseHandle(hThread);
+    VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+    return false;
+  }
 
   CloseHandle(hThread);
-  VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+  if(!VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE))
+  {
+    RDCERR("Couldn't free remote memory for injected call %s: %lu", funcName,
+           (unsigned long)GetLastError());
+    return false;
+  }
+
+  RDCDEBUG("Injected call %s completed with remote thread exit code %lu", funcName,
+           (unsigned long)threadExitCode);
+  return true;
 }
 
 static PROCESS_INFORMATION RunProcess(const rdcstr &app, const rdcstr &workingDir,
@@ -599,11 +1187,23 @@ static PROCESS_INFORMATION RunProcess(const rdcstr &app, const rdcstr &workingDi
 
   if(!retValue)
   {
+    if(IsSR44LaunchDiagnosticsEnabled())
+      LogSR44LaunchStage("CreateProcessW failed", StringFormat::Fmt("app='%s' error=%lu", app.c_str(),
+                                                                       (unsigned long)err)
+                             .c_str());
     if(!internal)
       RDCWARN("Process %s could not be loaded (error %d).", app.c_str(), err);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     RDCEraseEl(pi);
+  }
+  else if(IsSR44LaunchDiagnosticsEnabled())
+  {
+    LogSR44LaunchStage("CreateProcessW succeeded",
+                       StringFormat::Fmt("app='%s' pid=%lu tid=%lu", app.c_str(),
+                                          (unsigned long)pi.dwProcessId,
+                                          (unsigned long)pi.dwThreadId)
+                           .c_str());
   }
 
   return pi;
@@ -612,7 +1212,8 @@ static PROCESS_INFORMATION RunProcess(const rdcstr &app, const rdcstr &workingDi
 rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
                                                        const rdcarray<EnvironmentModification> &env,
                                                        const rdcstr &capturefile,
-                                                       const CaptureOptions &opts, bool waitForExit)
+                                                       const CaptureOptions &opts, bool waitForExit,
+                                                       void *hPrimaryThread)
 {
   rdcwstr wcapturefile = StringFormat::UTF82Wide(capturefile);
 
@@ -621,9 +1222,35 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
                       PROCESS_VM_WRITE | PROCESS_VM_READ | SYNCHRONIZE,
                   FALSE, pid);
 
+  if(IsSR44LaunchDiagnosticsEnabled())
+  {
+    if(hProcess)
+      LogSR44LaunchStage("OpenProcess succeeded",
+                         StringFormat::Fmt("pid=%lu handle=%p", (unsigned long)pid, hProcess)
+                             .c_str());
+    else
+      LogSR44LaunchStage("OpenProcess failed",
+                         StringFormat::Fmt("pid=%lu error=%lu", (unsigned long)pid,
+                                            (unsigned long)GetLastError())
+                             .c_str());
+  }
+
+  if(hProcess == NULL)
+  {
+    RDResult result;
+    SET_ERROR_RESULT(result, ResultCode::InjectionFailed, "Couldn't open target process %u: %lu", pid,
+                     GetLastError());
+    return {result, 0};
+  }
+
   if(opts.delayForDebugger > 0)
   {
     RDCDEBUG("Waiting for debugger attach to %lu", pid);
+    if(IsSR44LaunchDiagnosticsEnabled())
+      LogSR44LaunchStage("delayForDebugger",
+                         StringFormat::Fmt("pid=%lu seconds=%u", (unsigned long)pid,
+                                            (unsigned)opts.delayForDebugger)
+                             .c_str());
     uint32_t timeout = 0;
 
     BOOL debuggerAttached = FALSE;
@@ -755,7 +1382,7 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
     }
   }
 #else
-  // farm off to alternate bitness renderdoccmd.exe
+  // farm off to alternate bitness rendertestcmd.exe
 
   // if the target process is 'wow64' that means it's 32-bit.
   capalt = (isWow64 == TRUE);
@@ -773,7 +1400,7 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
 
       renderdocPath[idx] = 0;
 
-      wcscat_s(renderdocPath, L"\\Win32\\Development\\renderdoccmd.exe");
+      wcscat_s(renderdocPath, L"\\Win32\\Development\\rendertestcmd.exe");
     }
 
     if(!devLocation)
@@ -786,7 +1413,7 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
 
         renderdocPath[idx] = 0;
 
-        wcscat_s(renderdocPath, L"\\Win32\\Release\\renderdoccmd.exe");
+      wcscat_s(renderdocPath, L"\\Win32\\Release\\rendertestcmd.exe");
       }
     }
 
@@ -801,7 +1428,7 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
         *slash = 0;
 
       // append path
-      wcscat_s(renderdocPath, L"\\x86\\renderdoccmd.exe");
+      wcscat_s(renderdocPath, L"\\x86\\rendertestcmd.exe");
     }
 #else
     // if it looks like we're in the development environment, look for the alternate bitness in the
@@ -813,7 +1440,7 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
 
       renderdocPath[idx] = 0;
 
-      wcscat_s(renderdocPath, L"\\x64\\Development\\renderdoccmd.exe");
+      wcscat_s(renderdocPath, L"\\x64\\Development\\rendertestcmd.exe");
     }
 
     if(!devLocation)
@@ -826,7 +1453,7 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
 
         renderdocPath[idx] = 0;
 
-        wcscat_s(renderdocPath, L"\\x64\\Release\\renderdoccmd.exe");
+      wcscat_s(renderdocPath, L"\\x64\\Release\\rendertestcmd.exe");
       }
     }
 
@@ -846,7 +1473,7 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
         *slash = 0;
 
       // append path
-      wcscat_s(renderdocPath, L"\\renderdoccmd.exe");
+      wcscat_s(renderdocPath, L"\\rendertestcmd.exe");
     }
 #endif
 
@@ -1008,7 +1635,11 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
     return {ResultCode::Succeeded, (uint32_t)exitCode};
   }
 
-  rdcstr injectError = InjectDLL(hProcess, renderdocPath);
+  rdcstr injectError = InjectDLL(hProcess, renderdocPath, (HANDLE)hPrimaryThread);
+
+  if(IsSR44LaunchDiagnosticsEnabled())
+    LogSR44LaunchStage("remote DLL load", injectError.empty() ? "InjectDLL returned success"
+                                                               : injectError.c_str());
 
   const char *rdoc_dll = STRINGIZE(RDOC_BASE_NAME);
 
@@ -1034,20 +1665,32 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
   {
     // safe to cast away the const as we know these functions don't modify the parameters
 
+    bool configOk = true;
+    HANDLE primaryThread = (HANDLE)hPrimaryThread;
+
+    auto callInjected = [&](const char *name, void *data, size_t dataLen) {
+      bool ok = InjectFunctionCall(hProcess, loc, name, data, dataLen, primaryThread);
+      if(IsSR44LaunchDiagnosticsEnabled())
+        LogSR44LaunchStage(name, ok ? "completed" : "failed");
+      if(!ok && configOk)
+      {
+        SET_ERROR_RESULT(result.first, ResultCode::InjectionFailed,
+                         "Injected call %s failed", name);
+        configOk = false;
+      }
+      return ok;
+    };
+
     if(!capturefile.empty())
-      InjectFunctionCall(hProcess, loc, "INTERNAL_SetCaptureFile", (void *)capturefile.c_str(),
-                         capturefile.size() + 1);
+      callInjected("INTERNAL_SetCaptureFile", (void *)capturefile.c_str(), capturefile.size() + 1);
 
     rdcstr debugLogfile = RDCGETLOGFILE();
 
-    InjectFunctionCall(hProcess, loc, "INTERNAL_SetDebugLogFile", (void *)debugLogfile.c_str(),
-                       debugLogfile.size() + 1);
+    callInjected("INTERNAL_SetDebugLogFile", (void *)debugLogfile.c_str(), debugLogfile.size() + 1);
 
-    InjectFunctionCall(hProcess, loc, "INTERNAL_SetCaptureOptions", (CaptureOptions *)&opts,
-                       sizeof(CaptureOptions));
+    callInjected("INTERNAL_SetCaptureOptions", (CaptureOptions *)&opts, sizeof(CaptureOptions));
 
-    InjectFunctionCall(hProcess, loc, "INTERNAL_GetTargetControlIdent", &result.second,
-                       sizeof(result.second));
+    callInjected("INTERNAL_GetTargetControlIdent", &result.second, sizeof(result.second));
 
     if(!env.empty())
     {
@@ -1062,16 +1705,17 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
           break;
 
         InjectFunctionCall(hProcess, loc, "INTERNAL_EnvModName", (void *)name.c_str(),
-                           name.size() + 1);
+                           name.size() + 1, primaryThread);
         InjectFunctionCall(hProcess, loc, "INTERNAL_EnvModValue", (void *)value.c_str(),
-                           value.size() + 1);
-        InjectFunctionCall(hProcess, loc, "INTERNAL_EnvSep", &sep, sizeof(sep));
-        InjectFunctionCall(hProcess, loc, "INTERNAL_EnvMod", &mod, sizeof(mod));
+                           value.size() + 1, primaryThread);
+        InjectFunctionCall(hProcess, loc, "INTERNAL_EnvSep", &sep, sizeof(sep), primaryThread);
+        InjectFunctionCall(hProcess, loc, "INTERNAL_EnvMod", &mod, sizeof(mod), primaryThread);
       }
 
       // parameter is unused
       void *dummy = NULL;
-      InjectFunctionCall(hProcess, loc, "INTERNAL_ApplyEnvMods", &dummy, sizeof(dummy));
+      InjectFunctionCall(hProcess, loc, "INTERNAL_ApplyEnvMods", &dummy, sizeof(dummy),
+                         primaryThread);
     }
   }
 
@@ -1174,6 +1818,8 @@ rdcpair<RDResult, uint32_t> Process::LaunchAndInjectIntoProcess(
     const rdcarray<EnvironmentModification> &env, const rdcstr &capturefile,
     const CaptureOptions &opts, bool waitForExit)
 {
+  ConfigureSR44LaunchDiagnostics();
+
   void *func =
       GetProcAddress(GetModuleHandleA(STRINGIZE(RDOC_BASE_NAME) ".dll"), "INTERNAL_SetCaptureFile");
 
@@ -1207,11 +1853,102 @@ rdcpair<RDResult, uint32_t> Process::LaunchAndInjectIntoProcess(
     return {result, 0};
   }
 
-  rdcpair<RDResult, uint32_t> ret = InjectIntoProcess(pi.dwProcessId, {}, capturefile, opts, false);
+  const bool sr44Diagnostics = IsSR44LaunchDiagnosticsEnabled();
+  g_SR44DiagnosticTargetPid = pi.dwProcessId;
+  if(sr44Diagnostics)
+    LogSR44LaunchStage("launch process handle", StringFormat::Fmt("pid=%lu tid=%lu", (unsigned long)pi.dwProcessId,
+                                                                    (unsigned long)pi.dwThreadId)
+                           .c_str());
 
-  CloseHandle(pi.hProcess);
-  ResumeThread(pi.hThread);
-  ResumeThread(pi.hThread);
+  rdcpair<RDResult, uint32_t> ret =
+      InjectIntoProcess(pi.dwProcessId, {}, capturefile, opts, false, pi.hThread);
+
+  if(sr44Diagnostics)
+    LogSR44LaunchStage("InjectIntoProcess",
+                       ret.first.message.empty()
+                           ? (ret.first == ResultCode::Succeeded ? "succeeded" : "failed")
+                           : ret.first.message.c_str());
+
+  if(!sr44Diagnostics)
+    CloseHandle(pi.hProcess);
+
+  if(sr44Diagnostics)
+  {
+    DWORD beforeExitCode = 0;
+    BOOL beforeExitOk = GetExitCodeProcess(pi.hProcess, &beforeExitCode);
+    LogSR44LaunchStage("pre-resume target state",
+                       beforeExitOk
+                           ? StringFormat::Fmt("code=%lu state=%s", (unsigned long)beforeExitCode,
+                                               beforeExitCode == STILL_ACTIVE ? "STILL_ACTIVE" : "exited")
+                                 .c_str()
+                           : StringFormat::Fmt("GetExitCodeProcess failed error=%lu",
+                                               (unsigned long)GetLastError())
+                                 .c_str());
+  }
+
+  SetLastError(ERROR_SUCCESS);
+  DWORD resumeFirst = ResumeThread(pi.hThread);
+  DWORD resumeFirstError = GetLastError();
+  if(sr44Diagnostics)
+    LogSR44LaunchStage("ResumeThread #1",
+                       StringFormat::Fmt("return=%lu lastError=%lu", (unsigned long)resumeFirst,
+                                          (unsigned long)resumeFirstError)
+                           .c_str());
+
+  SetLastError(ERROR_SUCCESS);
+  DWORD resumeSecond = ResumeThread(pi.hThread);
+  DWORD resumeSecondError = GetLastError();
+  if(sr44Diagnostics)
+    LogSR44LaunchStage("ResumeThread #2",
+                       StringFormat::Fmt("return=%lu lastError=%lu", (unsigned long)resumeSecond,
+                                          (unsigned long)resumeSecondError)
+                           .c_str());
+
+  if(sr44Diagnostics)
+  {
+    const uint64_t observeStart = GetTickCount64();
+    const DWORD observeWindowMs = GetSR44LaunchObservationMilliseconds();
+    DWORD waitResult = WaitForSingleObject(pi.hProcess, observeWindowMs);
+    DWORD exitCode = 0;
+    BOOL exitCodeOk = GetExitCodeProcess(pi.hProcess, &exitCode);
+
+    LogSR44LaunchStage(
+        "post-resume observation",
+        waitResult == WAIT_OBJECT_0
+            ? StringFormat::Fmt("exited after %llu ms code=%lu", (unsigned long long)(GetTickCount64() - observeStart),
+                                (unsigned long)(exitCodeOk ? exitCode : 0))
+                  .c_str()
+            : waitResult == WAIT_TIMEOUT
+                  ? StringFormat::Fmt("still running after %lu ms state=%s", (unsigned long)observeWindowMs,
+                                      exitCodeOk && exitCode == STILL_ACTIVE ? "STILL_ACTIVE" : "unknown")
+                        .c_str()
+                  : StringFormat::Fmt("wait failed result=%lu error=%lu", (unsigned long)waitResult,
+                                      (unsigned long)GetLastError())
+                        .c_str());
+
+    if(waitResult == WAIT_TIMEOUT)
+    {
+      DWORD laterExitCode = 0;
+      BOOL laterExitCodeOk = GetExitCodeProcess(pi.hProcess, &laterExitCode);
+      LogSR44LaunchStage(
+          "observation timeout state",
+          laterExitCodeOk
+              ? StringFormat::Fmt("code=%lu state=%s window_ms=%lu", (unsigned long)laterExitCode,
+                                  laterExitCode == STILL_ACTIVE ? "STILL_ACTIVE" : "exited",
+                                  (unsigned long)observeWindowMs)
+                    .c_str()
+              : StringFormat::Fmt("GetExitCodeProcess failed error=%lu window_ms=%lu",
+                                  (unsigned long)GetLastError(), (unsigned long)observeWindowMs)
+                    .c_str());
+    }
+
+    if(waitResult == WAIT_OBJECT_0 && exitCodeOk)
+      LogSR44LaunchJson("target_exit", "target process exited during observation", pi.dwProcessId,
+                        exitCode);
+  }
+
+  if(sr44Diagnostics)
+    CloseHandle(pi.hProcess);
 
   if(ret.second == 0 || ret.first != ResultCode::Succeeded)
   {
@@ -1265,7 +2002,7 @@ static RDResult HandleRegError(HKEY keyNative, HKEY keyWow32, LSTATUS ret, const
 
   RETURN_ERROR_RESULT(ResultCode::InjectionFailed,
                       "Error updating registry to enable global hook.\n"
-                      "Check that RenderDoc is correctly running as administrator.");
+      "Check that RenderTest is correctly running as administrator.");
 }
 
 #define REG_CHECK(msg)                                    \
@@ -1291,7 +2028,7 @@ RDResult BackupAndChangeRegistry(GlobalHookData &hookdata, const rdcstr &shimpat
   {
     RETURN_ERROR_RESULT(
         ResultCode::FileIOFailed,
-        "RenderDoc is installed on a volume or system that has short paths disabled.\n"
+        "RenderTest is installed on a volume or system that has short paths disabled.\n"
         "For the global hook, short paths must be enabled where RenderDoc is installed.");
   }
 
@@ -1304,7 +2041,7 @@ RDResult BackupAndChangeRegistry(GlobalHookData &hookdata, const rdcstr &shimpat
     {
       RETURN_ERROR_RESULT(
           ResultCode::FileIOFailed,
-          "RenderDoc is installed on a volume or system that has short paths disabled.\n"
+          "RenderTest is installed on a volume or system that has short paths disabled.\n"
           "For the global hook, short paths must be enabled where RenderDoc is installed.");
     }
   }
@@ -1541,8 +2278,8 @@ RDResult Process::StartGlobalHook(const rdcstr &pathmatch, const rdcstr &capture
 
   renderdocPath = get_dirname(renderdocPath);
 
-  // the native renderdoccmd.exe is always next to the dll. Wow32 will be somewhere else
-  rdcstr cmdpathNative = renderdocPath + "\\renderdoccmd.exe";
+  // the native rendertestcmd.exe is always next to the dll. Wow32 will be somewhere else
+  rdcstr cmdpathNative = renderdocPath + "\\rendertestcmd.exe";
   rdcstr cmdpathWow32;
 
   rdcstr shimpathNative = renderdocPath;
@@ -1550,8 +2287,8 @@ RDResult Process::StartGlobalHook(const rdcstr &pathmatch, const rdcstr &capture
 
 #if ENABLED(RDOC_X64)
 
-  // native shim is just renderdocshim64.dll
-  shimpathNative = renderdocPath + "\\renderdocshim64.dll";
+  // native shim is just rendertestshim64.dll
+  shimpathNative = renderdocPath + "\\rendertestshim64.dll";
 
   // if it looks like we're in the development environment, look for the alternate bitness in the
   // corresponding folder
@@ -1560,8 +2297,8 @@ RDResult Process::StartGlobalHook(const rdcstr &pathmatch, const rdcstr &capture
   {
     renderdocPath.erase(devLocation, ~0U);
 
-    shimpathWow32 = renderdocPath + "\\Win32\\Development\\renderdocshim32.dll";
-    cmdpathWow32 = renderdocPath + "\\Win32\\Development\\renderdoccmd.exe";
+    shimpathWow32 = renderdocPath + "\\Win32\\Development\\rendertestshim32.dll";
+    cmdpathWow32 = renderdocPath + "\\Win32\\Development\\rendertestcmd.exe";
   }
   else
   {
@@ -1571,22 +2308,22 @@ RDResult Process::StartGlobalHook(const rdcstr &pathmatch, const rdcstr &capture
     {
       renderdocPath.erase(devLocation, ~0U);
 
-      shimpathWow32 = renderdocPath + "\\Win32\\Release\\renderdocshim32.dll";
-      cmdpathWow32 = renderdocPath + "\\Win32\\Release\\renderdoccmd.exe";
+      shimpathWow32 = renderdocPath + "\\Win32\\Release\\rendertestshim32.dll";
+      cmdpathWow32 = renderdocPath + "\\Win32\\Release\\rendertestcmd.exe";
     }
   }
 
   // if we're not in the dev environment, assume it's under a x86\ subfolder
   if(devLocation < 0)
   {
-    shimpathWow32 = renderdocPath + "\\x86\\renderdocshim32.dll";
-    cmdpathWow32 = renderdocPath + "\\x86\\renderdoccmd.exe";
+    shimpathWow32 = renderdocPath + "\\x86\\rendertestshim32.dll";
+    cmdpathWow32 = renderdocPath + "\\x86\\rendertestcmd.exe";
   }
 
 #else
 
   // nothing fancy to do here for 32-bit, just point the shim next to our dll.
-  shimpathNative = renderdocPath + "\\renderdocshim32.dll";
+  shimpathNative = renderdocPath + "\\rendertestshim32.dll";
 
 #endif
 
