@@ -136,7 +136,7 @@ struct VersionCommand : public Command
   virtual bool Parse(cmdline::parser &, GlobalEnvironment &) { return true; }
   virtual int Execute(const CaptureOptions &)
   {
-    std::cout << "renderdoccmd " << (sizeof(uintptr_t) == sizeof(uint64_t) ? "x64" : "x86")
+    std::cout << "rendertestcmd " << (sizeof(uintptr_t) == sizeof(uint64_t) ? "x64" : "x86")
               << " v" MAJOR_MINOR_VERSION_STRING << " built from " << RENDERDOC_GetCommitHash()
               << std::endl;
 
@@ -291,7 +291,7 @@ public:
   {
     parser.add<uint32_t>("PID", 0, "The process ID of the process to inject.", true);
   }
-  virtual const char *Description() { return "Injects RenderDoc into a given running process."; }
+  virtual const char *Description() { return "Injects RenderTest into a given running process."; }
   virtual bool IsInternalOnly() { return false; }
   virtual bool IsCaptureCommand() { return true; }
   virtual bool Parse(cmdline::parser &parser, GlobalEnvironment &)
@@ -470,7 +470,7 @@ public:
     parser.add("preview", 'v', "Display a preview window when a replay is active.");
     parser.add<uint32_t>(
         "port", 'p',
-        "The port to listen on. Default is 0, which listens on RenderDoc's default port.", false, 0);
+        "The port to listen on. Default is 0, which listens on RenderTest's default port.", false, 0);
   }
   virtual const char *Description()
   {
@@ -1316,9 +1316,9 @@ public:
         {
           std::cerr << "** There is an unfixable problem with your vulkan layer configuration.\n\n"
                        "This is most commonly caused by having a distribution-provided package of "
-                       "RenderDoc "
-                       "installed, which cannot be modified by another build of RenderDoc.\n\n"
-                       "Please consult the RenderDoc documentation, or package/distribution "
+                       "RenderTest "
+                       "installed, which cannot be modified by another build of RenderTest.\n\n"
+                       "Please consult the RenderTest documentation, or package/distribution "
                        "documentation on "
                        "linux."
                     << std::endl;
@@ -1341,10 +1341,10 @@ public:
         std::cerr << std::endl;
 
         if(m_Info.flags & VulkanLayerFlags::OtherInstallsRegistered)
-          std::cerr << " - Non-matching RenderDoc layer(s) are registered." << std::endl;
+          std::cerr << " - Non-matching RenderTest layer(s) are registered." << std::endl;
 
         if(!(m_Info.flags & VulkanLayerFlags::ThisInstallRegistered))
-          std::cerr << " - This build's RenderDoc layer is not registered." << std::endl;
+          std::cerr << " - This build's RenderTest layer is not registered." << std::endl;
 
         std::cerr << std::endl;
 
@@ -1414,7 +1414,7 @@ public:
       }
       else
       {
-        std::cerr << "The RenderDoc vulkan layer appears to be correctly registered." << std::endl;
+        std::cerr << "The RenderTest vulkan layer appears to be correctly registered." << std::endl;
       }
 
       // don't do anything if we're just explaining the situation
@@ -1493,8 +1493,8 @@ static int command_usage(std::string command)
               << std::endl
               << std::endl;
 
-  std::cerr << "Usage: renderdoccmd <command> [args ...]" << std::endl;
-  std::cerr << "Command line tool for capture & replay with RenderDoc." << std::endl << std::endl;
+  std::cerr << "Usage: rendertestcmd <command> [args ...]" << std::endl;
+  std::cerr << "Command line tool for capture & replay with RenderTest." << std::endl << std::endl;
 
   std::cerr << "Command can be one of:" << std::endl;
 
@@ -1519,10 +1519,10 @@ static int command_usage(std::string command)
   }
   std::cerr << std::endl;
 
-  std::cerr << "To see details of any command, see 'renderdoccmd <command> --help'" << std::endl
+  std::cerr << "To see details of any command, see 'rendertestcmd <command> --help'" << std::endl
             << std::endl;
 
-  std::cerr << "For more information, see <https://renderdoc.org/>." << std::endl;
+  std::cerr << "For more information, see the RenderTest documentation." << std::endl;
 
   return 2;
 }
@@ -1609,7 +1609,7 @@ int renderdoccmd(GlobalEnvironment &env, std::vector<std::string> &argv)
 
     cmdline::parser cmd;
 
-    cmd.set_program_name("renderdoccmd");
+    cmd.set_program_name("rendertestcmd");
     cmd.set_header(command);
 
     it->second->AddOptions(cmd);

@@ -85,6 +85,7 @@ else()
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LINKER_FLAGS}")
 
     add_executable(renderdoccmd ${sources})
+    set_target_properties(renderdoccmd PROPERTIES OUTPUT_NAME "rendertestcmd")
     
     if(INTERNAL_SELF_CAPTURE)
         set_target_properties(renderdoccmd PROPERTIES OUTPUT_NAME "rdocselfcmd")

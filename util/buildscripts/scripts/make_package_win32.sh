@@ -117,11 +117,11 @@ rm -f dist/Release{32,64}/*.{exp,lib,metagen,xml} dist/Release{32,64}/*.vshost.*
 # Delete all but xml files from PDB folder as well (large files, and not useful)
 rm -f dist/ReleasePDBs{32,64}/*.{exp,lib,metagen} dist/Release{32,64}/*.vshost.*
 
-# In the 64bit release folder, make an x86 subfolder and copy in renderdoc 32bit
+# In the 64bit release folder, make an x86 subfolder and copy in RenderTest 32bit
 mkdir -p dist/Release64/x86
-cp -R dist/Release32/{d3dcompiler_47.dll,renderdoc.dll,renderdoc.json,renderdocshim32.dll,renderdoccmd.exe,dbghelp.dll,symsrv.dll,symsrv.yes} dist/Release64/x86/
+cp -R dist/Release32/{d3dcompiler_47.dll,rendertest.dll,rendertest.json,rendertestshim32.dll,rendertestcmd.exe,dbghelp.dll,symsrv.dll,symsrv.yes} dist/Release64/x86/
 mkdir -p dist/ReleasePDBs64/x86
-cp -R dist/ReleasePDBs32/{d3dcompiler_47.dll,renderdoc.dll,renderdoc.json,renderdoc.pdb,renderdocshim32.dll,renderdocshim32.pdb,renderdoccmd.exe,renderdoccmd.pdb,dbghelp.dll,symsrv.dll,symsrv.yes} dist/ReleasePDBs64/x86/
+cp -R dist/ReleasePDBs32/{d3dcompiler_47.dll,rendertest.dll,rendertest.json,rendertest.pdb,rendertestshim32.dll,rendertestshim32.pdb,rendertestcmd.exe,rendertestcmd.pdb,dbghelp.dll,symsrv.dll,symsrv.yes} dist/ReleasePDBs64/x86/
 
 VERSION=`grep -E "#define RENDERDOC_VERSION_(MAJOR|MINOR)" renderdoc/api/replay/version.h | tr -dc '[0-9\n]' | tr '\n' '.' | grep -Eo '[0-9]+\.[0-9]+'`
 

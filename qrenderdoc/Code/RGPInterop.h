@@ -53,7 +53,7 @@ enum class RGPCommand
 struct RGPInteropInit
 {
   int32_t interop_version = 0;
-  QString interop_name = QStringLiteral("RenderDoc");
+  QString interop_name = QStringLiteral("RenderTest");
 
   QVariantList toParams(uint32_t version) const
   {

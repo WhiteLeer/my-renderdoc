@@ -160,7 +160,7 @@ void RGPInterop::InitializeRGP()
   RGPInteropInit init;
 
   init.interop_version = 1;
-  init.interop_name = lit("RenderDoc");
+  init.interop_name = lit("RenderTest");
 
   QString encoded = EncodeCommand(RGPCommand::Initialize, init.toParams(m_Version));
 
@@ -415,7 +415,7 @@ bool RGPInterop::DecodeCommand(QString command)
     init.fromParams(m_Version, params);
 
     // TODO: decode the params here. This will contain the interop
-    // version and the name of the tool connected to RenderDoc
+    // version and the name of the tool connected to RenderTest
 
     return true;
   }
