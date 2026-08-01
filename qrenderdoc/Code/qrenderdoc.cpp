@@ -338,6 +338,11 @@ int main(int argc, char *argv[])
                                    lit("host:port"));
   parser.addOption(targetcontrol);
 
+  QCommandLineOption openRemoteManager(
+      lit("open-remote-manager"),
+      tr("Open the remote device manager on startup (diagnostic option)."));
+  parser.addOption(openRemoteManager);
+
   QCommandLineOption replayhost(lit("replayhost"), tr("The replay host to connect to on startup."),
                                 lit("host"));
   parser.addOption(replayhost);
@@ -724,6 +729,13 @@ int main(int argc, char *argv[])
       if(!pythonExited)
       {
         ctx.Begin(filename, remoteHost, remoteIdent, temp, uiscriptFile);
+
+        if(parser.isSet(openRemoteManager))
+        {
+          QMetaObject::invokeMethod(ctx.GetMainWindow()->Widget(),
+                                    "on_action_Manage_Remote_Servers_triggered",
+                                    Qt::QueuedConnection);
+        }
 
         while(ctx.isRunning())
         {
