@@ -1527,6 +1527,12 @@ VkResult WrappedVulkan::vkQueueSubmit(VkQueue queue, uint32_t submitCount,
 {
   SCOPED_DBG_SINK();
 
+  static uint32_t submitLogCount = 0;
+  uint32_t submitLogIndex = submitLogCount++;
+  if(submitLogIndex < 5 || (submitLogIndex % 1000) == 0)
+    RDCLOG("vkQueueSubmit observed: count=%u submits=%u state=%u", submitLogIndex, submitCount,
+           (uint32_t)m_State);
+
   if(HasFatalError())
     return VK_ERROR_DEVICE_LOST;
 
@@ -1564,6 +1570,10 @@ VkResult WrappedVulkan::vkQueueSubmit(VkQueue queue, uint32_t submitCount,
       commandBuffers.push_back(pSubmits[s].pCommandBuffers[i]);
     }
   }
+
+  if(submitLogIndex < 5 || (submitLogIndex % 1000) == 0)
+    RDCLOG("vkQueueSubmit markers: count=%u present=%u begin=%u end=%u commands=%zu", submitLogIndex,
+           present ? 1U : 0U, beginCapture ? 1U : 0U, endCapture ? 1U : 0U, commandBuffers.size());
 
   if(beginCapture)
   {
@@ -1720,6 +1730,12 @@ VkResult WrappedVulkan::vkQueueSubmit2(VkQueue queue, uint32_t submitCount,
 {
   SCOPED_DBG_SINK();
 
+  static uint32_t submit2LogCount = 0;
+  uint32_t submit2LogIndex = submit2LogCount++;
+  if(submit2LogIndex < 5 || (submit2LogIndex % 1000) == 0)
+    RDCLOG("vkQueueSubmit2 observed: count=%u submits=%u state=%u", submit2LogIndex, submitCount,
+           (uint32_t)m_State);
+
   if(HasFatalError())
     return VK_ERROR_DEVICE_LOST;
 
@@ -1757,6 +1773,10 @@ VkResult WrappedVulkan::vkQueueSubmit2(VkQueue queue, uint32_t submitCount,
       commandBuffers.push_back(pSubmits[s].pCommandBufferInfos[i].commandBuffer);
     }
   }
+
+  if(submit2LogIndex < 5 || (submit2LogIndex % 1000) == 0)
+    RDCLOG("vkQueueSubmit2 markers: count=%u present=%u begin=%u end=%u commands=%zu", submit2LogIndex,
+           present ? 1U : 0U, beginCapture ? 1U : 0U, endCapture ? 1U : 0U, commandBuffers.size());
 
   if(beginCapture)
   {
