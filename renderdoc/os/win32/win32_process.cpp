@@ -249,7 +249,7 @@ extern "C" __declspec(dllexport) void __cdecl INTERNAL_ApplyEnvMods(void *ignore
   Process::ApplyEnvironmentModification();
 }
 
-void InjectDLL(HANDLE hProcess, rdcwstr libName)
+rdcstr InjectDLL(HANDLE hProcess, rdcwstr libName)
 {
   wchar_t dllPath[MAX_PATH + 1] = {0};
   wcscpy_s(dllPath, libName.c_str());
@@ -258,12 +258,12 @@ void InjectDLL(HANDLE hProcess, rdcwstr libName)
 
   if(kernel32 == NULL)
   {
-    RDCERR("Couldn't get handle for kernel32.dll");
-    return;
+    DWORD err = GetLastError();
+    return StringFormat::Fmt("Couldn't get handle for kernel32.dll: %u", err);
   }
 
   void *remoteMem =
-      VirtualAllocEx(hProcess, NULL, sizeof(dllPath), MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+      VirtualAllocEx(hProcess, NULL, sizeof(dllPath), MEM_COMMIT, PAGE_READWRITE);
   if(remoteMem)
   {
     BOOL success = WriteProcessMemory(hProcess, remoteMem, (void *)dllPath, sizeof(dllPath), NULL);
@@ -274,26 +274,64 @@ void InjectDLL(HANDLE hProcess, rdcwstr libName)
           (LPTHREAD_START_ROUTINE)GetProcAddress(kernel32, "LoadLibraryW"), remoteMem, 0, NULL);
       if(hThread)
       {
-        WaitForSingleObject(hThread, INFINITE);
+        DWORD waitResult = WaitForSingleObject(hThread, INFINITE);
+        DWORD waitError = waitResult == WAIT_FAILED ? GetLastError() : ERROR_SUCCESS;
+        DWORD loadResult = 0;
+        BOOL gotExitCode = FALSE;
+        DWORD exitCodeError = ERROR_SUCCESS;
+
+        if(waitResult == WAIT_OBJECT_0)
+        {
+          gotExitCode = GetExitCodeThread(hThread, &loadResult);
+          if(!gotExitCode)
+            exitCodeError = GetLastError();
+        }
+
         CloseHandle(hThread);
+
+        if(waitResult != WAIT_OBJECT_0)
+        {
+          VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+          return StringFormat::Fmt("Waiting for remote LoadLibraryW failed: wait=0x%08x error=%u",
+                                   waitResult, waitError);
+        }
+
+        if(!gotExitCode)
+        {
+          VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+          return StringFormat::Fmt("Couldn't read remote LoadLibraryW result: %u", exitCodeError);
+        }
+
+        if(loadResult == 0)
+        {
+          VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+          return StringFormat::Fmt("Remote LoadLibraryW returned NULL for '%ls'", dllPath);
+        }
       }
       else
       {
-        RDCERR("Couldn't create remote thread for LoadLibraryW: %u", GetLastError());
+        DWORD err = GetLastError();
+        VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+        return StringFormat::Fmt("Couldn't create remote thread for LoadLibraryW: %u", err);
       }
     }
     else
     {
-      RDCERR("Couldn't write remote memory %p with dllPath '%ls': %u", remoteMem, dllPath,
-             GetLastError());
+      DWORD err = GetLastError();
+      VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+      return StringFormat::Fmt("Couldn't write remote memory %p with dllPath '%ls': %u", remoteMem,
+                               dllPath, err);
     }
 
     VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
   }
   else
   {
-    RDCERR("Couldn't allocate remote memory for DLL '%ls': %u", libName.c_str(), GetLastError());
+    return StringFormat::Fmt("Couldn't allocate remote memory for DLL '%ls': %u", libName.c_str(),
+                             GetLastError());
   }
+
+  return {};
 }
 
 uintptr_t FindRemoteDLL(DWORD pid, rdcstr libName)
@@ -970,7 +1008,7 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
     return {ResultCode::Succeeded, (uint32_t)exitCode};
   }
 
-  InjectDLL(hProcess, renderdocPath);
+  rdcstr injectError = InjectDLL(hProcess, renderdocPath);
 
   const char *rdoc_dll = STRINGIZE(RDOC_BASE_NAME);
 
@@ -980,11 +1018,17 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
 
   if(loc == 0)
   {
-    SET_ERROR_RESULT(
-        result.first, ResultCode::InjectionFailed,
-        "Failed to inject %s.dll into process. Check that the process did not crash or exit "
-        "early in initialisation, e.g. if the working directory is incorrectly set.",
-        rdoc_dll);
+    if(!injectError.empty())
+    {
+      SET_ERROR_RESULT(result.first, ResultCode::InjectionFailed, "Failed to inject %s.dll: %s",
+                       rdoc_dll, injectError.c_str());
+    }
+    else
+    {
+      SET_ERROR_RESULT(
+          result.first, ResultCode::InjectionFailed,
+          "LoadLibraryW succeeded but %s.dll was not visible in the target module list.", rdoc_dll);
+    }
   }
   else
   {
