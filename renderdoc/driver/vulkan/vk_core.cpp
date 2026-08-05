@@ -31,6 +31,7 @@
 #include "driver/shaders/spirv/spirv_compile.h"
 #include "jpeg-compressor/jpge.h"
 #include "maths/formatpacking.h"
+#include "os/os_specific.h"
 #include "serialise/rdcfile.h"
 #include "strings/string_utils.h"
 #include "vk_debug.h"
@@ -45,6 +46,11 @@ RDOC_EXTERN_CONFIG(bool, Vulkan_Debug_VerboseCommandRecording);
 RDOC_DEBUG_CONFIG(bool, Vulkan_Debug_SingleSubmitFlushing, false,
                   "Every command buffer is submitted and fully flushed to the GPU, to narrow down "
                   "the source of problems.");
+
+static bool UseOffscreenSubmitCapture()
+{
+  return Process::GetEnvVariable("RENDERDOC_CAPTURE_OFFSCREEN_SUBMIT") == "1";
+}
 
 uint64_t VkInitParams::GetSerialiseSize()
 {
@@ -3485,7 +3491,8 @@ void WrappedVulkan::Present(DeviceOwnedWindow devWnd)
   if(IsActiveCapturing(m_State) && !m_AppControlledCapture)
     RenderDoc::Inst().EndFrameCapture(devWnd);
 
-  bool trigger = RenderDoc::Inst().ShouldTriggerCapture(m_FrameCounter);
+  bool trigger = !UseOffscreenSubmitCapture() &&
+                 RenderDoc::Inst().ShouldTriggerCapture(m_FrameCounter);
   if(trigger)
   {
     RDCLOG("Vulkan Present consumed capture request: frame=%u device=%p window=%p state=%u",

@@ -1029,10 +1029,14 @@ bool ShouldHookEGL()
 {
   rdcstr toggle = Process::GetEnvVariable("RENDERDOC_HOOK_EGL");
 
-  if(toggle.size() >= 1 && toggle[0] == '0')
-  {
+  char processName[MAX_PATH] = {};
+  GetModuleFileNameA(NULL, processName, ARRAY_COUNT(processName));
+  const char *baseName = strrchr(processName, '\\');
+  baseName = baseName ? baseName + 1 : processName;
+  bool isMuMuDevice = !_stricmp(baseName, "MuMuNxDevice.exe");
+
+  if(toggle.size() >= 1 && toggle[0] == '0' && !isMuMuDevice)
     return false;
-  }
 
   return true;
 }

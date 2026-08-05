@@ -26,9 +26,15 @@
 #include "../vk_core.h"
 #include "../vk_debug.h"
 #include "core/settings.h"
+#include "os/os_specific.h"
 
 RDOC_EXTERN_CONFIG(bool, Vulkan_Debug_VerboseCommandRecording);
 RDOC_EXTERN_CONFIG(bool, Vulkan_Debug_SingleSubmitFlushing);
+
+static bool UseOffscreenSubmitCapture()
+{
+  return Process::GetEnvVariable("RENDERDOC_CAPTURE_OFFSCREEN_SUBMIT") == "1";
+}
 
 template <typename SerialiserType>
 bool WrappedVulkan::Serialise_vkGetDeviceQueue(SerialiserType &ser, VkDevice device,
@@ -1527,11 +1533,7 @@ VkResult WrappedVulkan::vkQueueSubmit(VkQueue queue, uint32_t submitCount,
 {
   SCOPED_DBG_SINK();
 
-  static uint32_t submitLogCount = 0;
-  uint32_t submitLogIndex = submitLogCount++;
-  if(submitLogIndex < 5 || (submitLogIndex % 1000) == 0)
-    RDCLOG("vkQueueSubmit observed: count=%u submits=%u state=%u", submitLogIndex, submitCount,
-           (uint32_t)m_State);
+  const bool offscreenSubmitCapture = UseOffscreenSubmitCapture();
 
   if(HasFatalError())
     return VK_ERROR_DEVICE_LOST;
@@ -1544,8 +1546,8 @@ VkResult WrappedVulkan::vkQueueSubmit(VkQueue queue, uint32_t submitCount,
 
   if(IsActiveCapturing(m_State))
   {
-    // 15 is quite a lot of submissions.
-    const int expectedMaxSubmissions = 15;
+    // Bound offscreen captures to a small number of submissions.
+    const int expectedMaxSubmissions = 3;
 
     RenderDoc::Inst().SetProgress(CaptureProgress::FrameCapture,
                                   FakeProgress(m_SubmitCounter, expectedMaxSubmissions));
@@ -1571,9 +1573,9 @@ VkResult WrappedVulkan::vkQueueSubmit(VkQueue queue, uint32_t submitCount,
     }
   }
 
-  if(submitLogIndex < 5 || (submitLogIndex % 1000) == 0)
-    RDCLOG("vkQueueSubmit markers: count=%u present=%u begin=%u end=%u commands=%zu", submitLogIndex,
-           present ? 1U : 0U, beginCapture ? 1U : 0U, endCapture ? 1U : 0U, commandBuffers.size());
+  if(offscreenSubmitCapture && m_FrameCounter == 0 && !IsActiveCapturing(m_State) &&
+     RenderDoc::Inst().ShouldTriggerCapture(0))
+    RenderDoc::Inst().StartFrameCapture(DeviceOwnedWindow(LayerDisp(m_Instance), NULL));
 
   if(beginCapture)
   {
@@ -1628,6 +1630,10 @@ VkResult WrappedVulkan::vkQueueSubmit(VkQueue queue, uint32_t submitCount,
       }
     }
   }
+
+  if(offscreenSubmitCapture && m_FrameCounter == 0 && IsActiveCapturing(m_State) &&
+     m_SubmitCounter >= 3)
+    RenderDoc::Inst().EndFrameCapture(DeviceOwnedWindow(LayerDisp(m_Instance), NULL));
 
   if(endCapture)
   {
