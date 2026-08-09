@@ -109,7 +109,7 @@ set(VULKAN_JSON_SUFFIX "" CACHE STRING "Suffix for the vulkan implicit_layer jso
 
 option(INTERNAL_SELF_CAPTURE "Internal option: enable self-capture" OFF)
 
-set(RDOC_BASE_NAME "renderdoc")
+set(RDOC_BASE_NAME "rendertest")
 if(INTERNAL_SELF_CAPTURE)
     set(RDOC_BASE_NAME "rdocself")
     add_definitions(-DRDOC_SELFCAPTURE_LIMITEDAPI=1)
@@ -198,7 +198,7 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/.git/HEAD")
     endif()
 endif()
 
-project(RenderDoc CXX C)
+project(RenderTest CXX C)
 
 option(ENABLE_GL "Enable GL driver" ON)
 option(ENABLE_GLES "Enable GL ES driver" ON)
@@ -264,7 +264,7 @@ string(REGEX MATCH "[0-9]+" RENDERDOC_VERSION_MINOR "${MINOR_VERSION_LINE}")
 
 set(RENDERDOC_VERSION "${RENDERDOC_VERSION_MAJOR}.${RENDERDOC_VERSION_MINOR}")
 
-message(STATUS "Building RenderDoc version ${RENDERDOC_VERSION}")
+message(STATUS "Building RenderTest version ${RENDERDOC_VERSION}")
 
 if(RENDERDOC_VERSION_MAJOR STREQUAL "")
     message(FATAL_ERROR "Couldn't calculate major version")

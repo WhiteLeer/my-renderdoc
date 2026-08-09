@@ -1,10 +1,10 @@
 <?xml version='1.0' encoding='windows-1252'?>
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
-  <Product Name='RenderDoc' Id='*' UpgradeCode='D320753C-4B18-4905-A752-E68959943E7D'
+  <Product Name='RenderTest' Id='*' UpgradeCode='D320753C-4B18-4905-A752-E68959943E7D'
     Language='1033' Codepage='1252' Version='$(env.RENDERDOC_VERSION).0' Manufacturer='Baldur Karlsson'>
 
-    <Package Id='*' Keywords='Installer' Description="Installer for RenderDoc"
-      Comments='RenderDoc Homepage is http://renderdoc.org/' Platform="x64" Manufacturer='Baldur Karlsson'
+    <Package Id='*' Keywords='Installer' Description="Installer for RenderTest"
+      Comments='RenderTest Homepage is http://renderdoc.org/' Platform="x64" Manufacturer='Baldur Karlsson'
       InstallerVersion='301' Languages='1033' Compressed='yes' SummaryCodepage='1252' />
 
     <InstallExecuteSequence>
@@ -13,7 +13,7 @@
 
     <Property Id="MajorMinorVersion">$(env.RENDERDOC_VERSION)</Property>
 
-    <Property Id="REINSTALLMODE" Value="amus"/> 
+    <Property Id="REINSTALLMODE" Value="amus"/>
 
     <Upgrade Id="D320753C-4B18-4905-A752-E68959943E7D">
       <UpgradeVersion Minimum="0.18.0"
@@ -28,55 +28,55 @@
       NOT NEWERVERSIONDETECTED
     </Condition>
 
-    <Media Id='1' Cabinet='renderdoc.cab' EmbedCab='yes' CompressionLevel='high' DiskPrompt="CD-ROM #1" />
-    <Property Id='DiskPrompt' Value="RenderDoc Installation [1]" />
+    <Media Id='1' Cabinet='rendertest.cab' EmbedCab='yes' CompressionLevel='high' DiskPrompt="CD-ROM #1" />
+    <Property Id='DiskPrompt' Value="RenderTest Installation [1]" />
 
     <Directory Id='TARGETDIR' Name='SourceDir'>
       <Directory Id='ProgramFiles64Folder' Name='PFiles'>
-        <Directory Id='INSTALLDIR' Name='RenderDoc'>
+        <Directory Id='INSTALLDIR' Name='RenderTest'>
 
           <Component Id='QRenderDoc' Win64="yes" Guid='44398F0D-3FE3-470A-A137-BDFDFE82353D'>
-            <File Id='qrenderdocEXE' Name='qrenderdoc.exe' DiskId='1' Source='dist/Release64/qrenderdoc.exe' KeyPath='yes'>
-              <Shortcut Id="startmenuRenderDoc" Directory="ProgramMenuDir" Name="RenderDoc" WorkingDirectory='INSTALLDIR' Icon="icon.ico" IconIndex="0" Advertise="yes" />
+            <File Id='qrenderdocEXE' Name='qrendertest.exe' DiskId='1' Source='dist/Release64/qrendertest.exe' KeyPath='yes'>
+              <Shortcut Id="startmenuRenderDoc" Directory="ProgramMenuDir" Name="RenderTest" WorkingDirectory='INSTALLDIR' Icon="icon.ico" IconIndex="0" Advertise="yes" />
             </File>
 
             <RegistryValue Root="HKLM" Id="VerbRDC" Action="write"
-              Key="Software\Classes\RenderDoc.RDCCapture.1\shell\open\command"
+              Key="Software\Classes\RenderTest.RDCCapture.1\shell\open\command"
               Value='"[#qrenderdocEXE]" "%1"'
               Type="expandable" />
             <RegistryValue Root="HKLM" Id="VerbDescRDC" Action="write"
-              Key="Software\Classes\RenderDoc.RDCCapture.1"
-              Value='RenderDoc Capture Log (.rdc)'
+              Key="Software\Classes\RenderTest.RDCCapture.1"
+              Value='RenderTest Capture Log (.rdc)'
               Type="expandable" />
             <RegistryValue Root="HKLM" Id="VerbIconRDC" Action="write"
-              Key="Software\Classes\RenderDoc.RDCCapture.1\DefaultIcon"
+              Key="Software\Classes\RenderTest.RDCCapture.1\DefaultIcon"
               Value='[#qrenderdocEXE]'
               Type="expandable" />
             <RegistryValue Root="HKLM" Id="RDCProgIDCLSID" Action="write"
-              Key="Software\Classes\RenderDoc.RDCCapture.1\CLSID"
+              Key="Software\Classes\RenderTest.RDCCapture.1\CLSID"
               Value='{5D6BF029-A6BA-417A-8523-120492B1DCE3}'
               Type="expandable" />
 
             <RegistryValue Root="HKLM" Id="VerbCAP" Action="write"
-              Key="Software\Classes\RenderDoc.RDCSettings.1\shell\open\command"
+              Key="Software\Classes\RenderTest.RDCSettings.1\shell\open\command"
               Value='"[#qrenderdocEXE]" "%1"'
               Type="expandable" />
             <RegistryValue Root="HKLM" Id="VerbDescCAP" Action="write"
-              Key="Software\Classes\RenderDoc.RDCSettings.1"
-              Value='RenderDoc Capture Settings (.cap)'
+              Key="Software\Classes\RenderTest.RDCSettings.1"
+              Value='RenderTest Capture Settings (.cap)'
               Type="expandable" />
             <RegistryValue Root="HKLM" Id="VerbIconCAP" Action="write"
-              Key="Software\Classes\RenderDoc.RDCSettings.1\DefaultIcon"
+              Key="Software\Classes\RenderTest.RDCSettings.1\DefaultIcon"
               Value='[#qrenderdocEXE]'
               Type="expandable" />
 
           </Component>
 
           <Component Id='RenderDocCPP' Win64="yes" Guid='9D5949F9-0447-47B6-829D-77465E1FDAD9'>
-            <File Id='RenderDocCPP' Name='renderdoc.dll' DiskId='1' Source='dist/Release64/renderdoc.dll' KeyPath='yes' />
-            <File Id='RenderDocJSON' Name='renderdoc.json' DiskId='1' Source='dist/Release64/renderdoc.json' />
+            <File Id='RenderDocCPP' Name='rendertest.dll' DiskId='1' Source='dist/Release64/rendertest.dll' KeyPath='yes' />
+            <File Id='RenderDocJSON' Name='rendertest.json' DiskId='1' Source='dist/Release64/rendertest.json' />
             <File Id='D3DCompiler47DLL64' Name='d3dcompiler_47.dll' DiskId='1' Source='dist/Release64/d3dcompiler_47.dll' />
-            <File Id='RenderDocSHIM' Name='renderdocshim64.dll' DiskId='1' Source='dist/Release64/renderdocshim64.dll' />
+            <File Id='RenderDocSHIM' Name='rendertestshim64.dll' DiskId='1' Source='dist/Release64/rendertestshim64.dll' />
             <File Id='dbghelpDLL' Name='dbghelp.dll' DiskId='1' Source='dist/Release64/dbghelp.dll' />
             <File Id='symsrvDLL' Name='symsrv.dll' DiskId='1' Source='dist/Release64/symsrv.dll' />
             <File Id='symsrvYES' Name='symsrv.yes' DiskId='1' Source='dist/Release64/symsrv.yes' />
@@ -85,7 +85,7 @@
 
             <RegistryValue Root="HKLM" Id="RDCCLSID" Action="write"
               Key="Software\Classes\CLSID\{5D6BF029-A6BA-417A-8523-120492B1DCE3}"
-              Value='RenderDoc Thumbnail Handler'
+              Value='RenderTest Thumbnail Handler'
               Type="expandable" />
             <RegistryValue Root="HKLM" Id="RDCCLSIDServer" Action="write"
               Key="Software\Classes\CLSID\{5D6BF029-A6BA-417A-8523-120492B1DCE3}\InprocServer32"
@@ -104,7 +104,7 @@
           </Component>
 
           <Component Id='RenderDocCMD' Win64="yes" Guid='3443061F-2B11-4661-8535-4319D97B375C'>
-            <File Id='RenderDocCMD' Name='renderdoccmd.exe' DiskId='1' Source='dist/Release64/renderdoccmd.exe' KeyPath='yes' />
+            <File Id='RenderDocCMD' Name='rendertestcmd.exe' DiskId='1' Source='dist/Release64/rendertestcmd.exe' KeyPath='yes' />
           </Component>
 
           <Component Id='Qt' Win64="yes" Guid='E1BC516F-F611-4C7B-8F3E-A459F026FC4E'>
@@ -126,7 +126,7 @@
 
           <Component Id='Documentation' Win64="yes" Guid='C49ABF1D-1D73-469B-A44A-DD9470E85F19'>
             <File Id='Documentation' Name='renderdoc.chm' DiskId='1' Source='dist/Release64/renderdoc.chm' KeyPath='yes'>
-              <Shortcut Id="startmenuDocs" Directory="ProgramMenuDir" Name="RenderDoc Documentation" Icon='chm.ico' Advertise="yes" />
+              <Shortcut Id="startmenuDocs" Directory="ProgramMenuDir" Name="RenderTest Documentation" Icon='chm.ico' Advertise="yes" />
             </File>
           </Component>
 
@@ -164,13 +164,13 @@
                   <File Id='virtualcontextEXE' Name='VirtualContext.exe' DiskId='1' Source='dist/Release64/plugins/amd/isa/VirtualContext.exe' />
                 </Component>
               </Directory>
-              
+
               <Directory Id='plugins_amd_rgp' Name='rgp'>
                 <Component Id='rgp_plugin' Win64="yes" Guid='6F6ED705-A22F-4CE7-BC12-86332BC5263D'>
                   <File Id='amdrgpDLL' Name='DevDriverAPI-x64.dll' DiskId='1' Source='dist/Release64/plugins/amd/rgp/DevDriverAPI-x64.dll' KeyPath='yes' />
                 </Component>
               </Directory>
-              
+
               <Directory Id='plugins_amd_ags' Name='ags'>
                 <Component Id='ags_plugin' Win64="yes" Guid='B7BD4CB6-0823-4EA0-8A86-A77CBA2BE6B0'>
                   <File Id='amdagsDLL' Name='amd_ags_x64.dll' DiskId='1' Source='dist/Release64/plugins/amd/ags/amd_ags_x64.dll' KeyPath='yes' />
@@ -216,10 +216,10 @@
 
           <Directory Id='renderdocX86' Name='x86'>
             <Component Id='renderdocX86Bins' Win64="yes" Guid='EB58A048-899A-4239-B229-DA9781C431F8'>
-              <File Id='renderdocX86DLL' Name='renderdoc.dll' DiskId='1' Source='dist/Release64/x86/renderdoc.dll' KeyPath='yes' />
-              <File Id='renderdocX86JSON' Name='renderdoc.json' DiskId='1' Source='dist/Release64/x86/renderdoc.json' />
-              <File Id='renderdocshimX86DLL' Name='renderdocshim32.dll' DiskId='1' Source='dist/Release64/x86/renderdocshim32.dll' />
-              <File Id='renderdocX86CMD' Name='renderdoccmd.exe' DiskId='1' Source='dist/Release64/x86/renderdoccmd.exe' />
+            <File Id='renderdocX86DLL' Name='rendertest.dll' DiskId='1' Source='dist/Release64/x86/rendertest.dll' KeyPath='yes' />
+              <File Id='renderdocX86JSON' Name='rendertest.json' DiskId='1' Source='dist/Release64/x86/rendertest.json' />
+              <File Id='renderdocshimX86DLL' Name='rendertestshim32.dll' DiskId='1' Source='dist/Release64/x86/rendertestshim32.dll' />
+              <File Id='renderdocX86CMD' Name='rendertestcmd.exe' DiskId='1' Source='dist/Release64/x86/rendertestcmd.exe' />
               <File Id='dbghelp32DLL' Name='dbghelp.dll' DiskId='1' Source='dist/Release64/x86/dbghelp.dll' />
               <File Id='symsrv32DLL' Name='symsrv.dll' DiskId='1' Source='dist/Release64/x86/symsrv.dll' />
               <File Id='symsrv32YES' Name='symsrv.yes' DiskId='1' Source='dist/Release64/x86/symsrv.yes' />
@@ -228,7 +228,7 @@
 
               <RegistryValue Root="HKLM" Id="RDCCLSID32" Action="write"
                 Key="Software\Wow6432Node\Classes\CLSID\{5D6BF029-A6BA-417A-8523-120492B1DCE3}"
-                Value='RenderDoc Thumbnail Handler'
+                Value='RenderTest Thumbnail Handler'
                 Type="expandable" />
               <RegistryValue Root="HKLM" Id="RDCCLSIDServer32" Action="write"
                 Key="Software\Wow6432Node\Classes\CLSID\{5D6BF029-A6BA-417A-8523-120492B1DCE3}\InprocServer32"
@@ -249,7 +249,7 @@
       </Directory>
 
       <Directory Id="ProgramMenuFolder" Name="Programs">
-        <Directory Id="ProgramMenuDir" Name="RenderDoc">
+        <Directory Id="ProgramMenuDir" Name="RenderTest">
           <Component Id="ProgramMenuDir" Guid="D0755B01-F8D5-4DFE-8D21-DA4ED84B555D">
             <RemoveFolder Id='ProgramMenuDir' On='uninstall' />
             <RegistryValue Root='HKCU' Key='Software\[Manufacturer]\[ProductName]' Type='string' Value='' KeyPath='yes' />
@@ -258,76 +258,76 @@
       </Directory>
       <Component Id="ImageOpenWith" Guid="BD518767-45FB-412F-86E8-E741AAA48906">
         <RegistryValue Root="HKLM" Id="RDCOpenWithCommand" Action="write" KeyPath='yes'
-          Key="Software\Classes\Applications\qrenderdoc.exe\shell\open\command"
+          Key="Software\Classes\Applications\qrendertest.exe\shell\open\command"
           Value='"[#qrenderdocEXE]" "%1"'
           Type="string" />
 
         <RegistryValue Root="HKLM" Id="RDCOpenWithDDS" Action="write"
-          Key="Software\Classes\Applications\qrenderdoc.exe\SupportedTypes"
+          Key="Software\Classes\Applications\qrendertest.exe\SupportedTypes"
           Name='.dds'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithHDR" Action="write"
-          Key="Software\Classes\Applications\qrenderdoc.exe\SupportedTypes"
+          Key="Software\Classes\Applications\qrendertest.exe\SupportedTypes"
           Name='.hdr'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithJPG" Action="write"
-          Key="Software\Classes\Applications\qrenderdoc.exe\SupportedTypes"
+          Key="Software\Classes\Applications\qrendertest.exe\SupportedTypes"
           Name='.jpg'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithJPEG" Action="write"
-          Key="Software\Classes\Applications\qrenderdoc.exe\SupportedTypes"
+          Key="Software\Classes\Applications\qrendertest.exe\SupportedTypes"
           Name='.jpeg'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithPNG" Action="write"
-          Key="Software\Classes\Applications\qrenderdoc.exe\SupportedTypes"
+          Key="Software\Classes\Applications\qrendertest.exe\SupportedTypes"
           Name='.png'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithEXR" Action="write"
-          Key="Software\Classes\Applications\qrenderdoc.exe\SupportedTypes"
+          Key="Software\Classes\Applications\qrendertest.exe\SupportedTypes"
           Name='.exr'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithTGA" Action="write"
-          Key="Software\Classes\Applications\qrenderdoc.exe\SupportedTypes"
+          Key="Software\Classes\Applications\qrendertest.exe\SupportedTypes"
           Name='.tga'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithBMP" Action="write"
-          Key="Software\Classes\Applications\qrenderdoc.exe\SupportedTypes"
+          Key="Software\Classes\Applications\qrendertest.exe\SupportedTypes"
           Name='.bmp'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithGIF" Action="write"
-          Key="Software\Classes\Applications\qrenderdoc.exe\SupportedTypes"
+          Key="Software\Classes\Applications\qrendertest.exe\SupportedTypes"
           Name='.gif'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithPSD" Action="write"
-          Key="Software\Classes\Applications\qrenderdoc.exe\SupportedTypes"
+          Key="Software\Classes\Applications\qrendertest.exe\SupportedTypes"
           Name='.psd'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithProgidDDS" Action="write"
-          Key="Software\Classes\.dds\OpenWithProgids" Name='RenderDoc.RDCCapture.1'  Value='' Type="string" />
+          Key="Software\Classes\.dds\OpenWithProgids" Name='RenderTest.RDCCapture.1'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithProgidHDR" Action="write"
-          Key="Software\Classes\.hdr\OpenWithProgids" Name='RenderDoc.RDCCapture.1'  Value='' Type="string" />
+          Key="Software\Classes\.hdr\OpenWithProgids" Name='RenderTest.RDCCapture.1'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithProgidJPG" Action="write"
-          Key="Software\Classes\.jpg\OpenWithProgids" Name='RenderDoc.RDCCapture.1'  Value='' Type="string" />
+          Key="Software\Classes\.jpg\OpenWithProgids" Name='RenderTest.RDCCapture.1'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithProgidJPEG" Action="write"
-          Key="Software\Classes\.jpeg\OpenWithProgids" Name='RenderDoc.RDCCapture.1' Value='' Type="string" />
+          Key="Software\Classes\.jpeg\OpenWithProgids" Name='RenderTest.RDCCapture.1' Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithProgidPNG" Action="write"
-          Key="Software\Classes\.png\OpenWithProgids" Name='RenderDoc.RDCCapture.1'  Value='' Type="string" />
+          Key="Software\Classes\.png\OpenWithProgids" Name='RenderTest.RDCCapture.1'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithProgidEXR" Action="write"
-          Key="Software\Classes\.exr\OpenWithProgids" Name='RenderDoc.RDCCapture.1'  Value='' Type="string" />
+          Key="Software\Classes\.exr\OpenWithProgids" Name='RenderTest.RDCCapture.1'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithProgidTGA" Action="write"
-          Key="Software\Classes\.tga\OpenWithProgids" Name='RenderDoc.RDCCapture.1'  Value='' Type="string" />
+          Key="Software\Classes\.tga\OpenWithProgids" Name='RenderTest.RDCCapture.1'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithProgidBMP" Action="write"
-          Key="Software\Classes\.bmp\OpenWithProgids" Name='RenderDoc.RDCCapture.1'  Value='' Type="string" />
+          Key="Software\Classes\.bmp\OpenWithProgids" Name='RenderTest.RDCCapture.1'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithProgidGIF" Action="write"
-          Key="Software\Classes\.gif\OpenWithProgids" Name='RenderDoc.RDCCapture.1'  Value='' Type="string" />
+          Key="Software\Classes\.gif\OpenWithProgids" Name='RenderTest.RDCCapture.1'  Value='' Type="string" />
         <RegistryValue Root="HKLM" Id="RDCOpenWithProgidPSD" Action="write"
-          Key="Software\Classes\.psd\OpenWithProgids" Name='RenderDoc.RDCCapture.1'  Value='' Type="string" />
+          Key="Software\Classes\.psd\OpenWithProgids" Name='RenderTest.RDCCapture.1'  Value='' Type="string" />
       </Component>
       <Component Id="ImageThumbnailProvider" Guid="E79B67C0-1128-4471-80C5-6233EF37414C">
         <RegistryValue Root="HKLM" Id="RDCProvider" Action="write" KeyPath='yes'
-          Key="Software\Classes\RenderDoc.RDCCapture.1\ShellEx\{e357fccd-a995-4576-b01f-234630154e96}"
+          Key="Software\Classes\RenderTest.RDCCapture.1\ShellEx\{e357fccd-a995-4576-b01f-234630154e96}"
           Value='{5D6BF029-A6BA-417A-8523-120492B1DCE3}'
           Type="expandable" />
       </Component>
 
       <Component Id="FileExtensionRDC" Guid="65374649-9C72-40A1-97EC-F92BAE7C80F4">
-        <ProgId Id='RenderDoc.RDCCapture.1' Description='RenderDoc Capture Log (.rdc)'>
+        <ProgId Id='RenderTest.RDCCapture.1' Description='RenderTest Capture Log (.rdc)'>
           <Extension Id='rdc' />
         </ProgId>
       </Component>
 
       <Component Id="FileExtensionCAP"  Guid="1029AAEF-2700-428B-9FCA-67CC1F6BDE85">
-        <ProgId Id='RenderDoc.RDCSettings.1' Description='RenderDoc Capture Settings (.cap)'>
+        <ProgId Id='RenderTest.RDCSettings.1' Description='RenderTest Capture Settings (.cap)'>
           <Extension Id='cap' />
         </ProgId>
       </Component>
@@ -412,7 +412,7 @@
       <Custom Action="RemoveHash" Before="LaunchConditions"/>
     </InstallUISequence>
 
-    <Feature Id='Complete' Title='RenderDoc' Description='Everything included.' AllowAdvertise='no' Absent='disallow' Display='expand' Level='1' ConfigurableDirectory='INSTALLDIR'>
+    <Feature Id='Complete' Title='RenderTest' Description='Everything included.' AllowAdvertise='no' Absent='disallow' Display='expand' Level='1' ConfigurableDirectory='INSTALLDIR'>
       <Feature Id='MainProgram' Title='Program' Description='The main executable with everything needed to capture and replay.' AllowAdvertise='no' Absent='disallow' Level='1'>
         <ComponentRef Id='QRenderDoc' />
         <ComponentRef Id='RenderDocCPP' />
@@ -464,7 +464,7 @@
         <ComponentRef Id='Documentation' />
       </Feature>
 
-      <Feature Id='FileExts' Title='File Associations' Description='Associate .rdc (Capture logs) and .cap (Capture settings) files with RenderDoc.' Level='1'>
+      <Feature Id='FileExts' Title='File Associations' Description='Associate .rdc (Capture logs) and .cap (Capture settings) files with RenderTest.' Level='1'>
         <ComponentRef Id='ImageThumbnailProvider' />
         <ComponentRef Id='FileExtensionRDC' />
         <ComponentRef Id='FileExtensionCAP' />

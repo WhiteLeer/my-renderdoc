@@ -107,9 +107,9 @@ rdcwstr GetSymSearchPath()
 
     sympath = L".;";
     sympath += appdata.c_str();
-    sympath += L"\\renderdoc\\symbols;SRV*";
+    sympath += L"\\RenderTest\\symbols;SRV*";
     sympath += appdata.c_str();
-    sympath += L"\\renderdoc\\symbols\\symsrv*http://msdl.microsoft.com/download/symbols";
+    sympath += L"\\RenderTest\\symbols\\symsrv*http://msdl.microsoft.com/download/symbols";
 
     return sympath.c_str();
   }
@@ -1004,9 +1004,9 @@ Win32CallstackResolver::Win32CallstackResolver(bool interactive, byte *moduleDB,
 
       RDCWARN("Couldn't get symbols for %s", m.name.c_str());
 
-      // silently ignore renderdoc.dll, dbghelp.dll, and symsrv.dll without asking to permanently
+      // silently ignore rendertest.dll, dbghelp.dll, and symsrv.dll without asking to permanently
       // ignore
-      if(m.name.contains("renderdoc.") || m.name.contains("dbghelp.") || m.name.contains("symsrv."))
+      if(m.name.contains("rendertest.") || m.name.contains("dbghelp.") || m.name.contains("symsrv."))
         continue;
 
       // if we're not interactive, just continue

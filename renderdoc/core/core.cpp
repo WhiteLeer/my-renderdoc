@@ -690,7 +690,7 @@ void RenderDoc::Initialise()
   {
     rdcstr capture_filename;
 
-    const rdcstr base = IsReplayApp() ? "RenderDoc" : "RenderDoc_app";
+    const rdcstr base = IsReplayApp() ? "RenderTest" : "RenderTest_app";
 
     FileIO::GetDefaultFiles(base, capture_filename, m_LoggingFilename, m_Target);
 

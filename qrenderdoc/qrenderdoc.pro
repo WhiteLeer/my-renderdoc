@@ -12,7 +12,7 @@ lessThan(QT_MAJOR_VERSION, 5): error("requires Qt 5.6; found $$[QT_VERSION]")
 
 equals(QT_MAJOR_VERSION, 5): lessThan(QT_MINOR_VERSION, 6): error("requires Qt 5.6; found $$[QT_VERSION]")
 
-TARGET = qrenderdoc
+TARGET = qrendertest
 TEMPLATE = app
 
 # include path for core renderdoc API

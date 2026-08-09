@@ -631,6 +631,7 @@ add_library(renderdoc SHARED ${renderdoc_objects})
 target_compile_definitions(renderdoc ${RDOC_DEFINITIONS})
 target_include_directories(renderdoc ${RDOC_INCLUDES})
 target_link_libraries(renderdoc ${RDOC_LIBRARIES})
+set_target_properties(renderdoc PROPERTIES OUTPUT_NAME "${RDOC_BASE_NAME}")
 
 add_dependencies(renderdoc renderdoc_libentry)
 
