@@ -24,6 +24,7 @@
 
 #include "BufferViewer.h"
 #include <float.h>
+#include <memory>
 #include <QDoubleSpinBox>
 #include <QFontDatabase>
 #include <QItemSelection>
@@ -3255,10 +3256,7 @@ void BufferViewer::stageRowMenu(MeshDataStage stage, QMenu *menu, const QPoint &
 
 BufferViewer::~BufferViewer()
 {
-  if(m_Output)
-  {
-    m_Ctx.Replay().BlockInvoke([this](IReplayController *r) { m_Output->Shutdown(); });
-  }
+  ShutdownOutput();
 
   delete m_Arcball;
   delete m_Flycam;
@@ -3272,21 +3270,26 @@ BufferViewer::~BufferViewer()
   m_CBufferViews.removeOne(this);
 }
 
+void BufferViewer::ShutdownOutput()
+{
+  if(!m_Output)
+    return;
+
+  IReplayOutput *output = m_Output;
+  m_Output = NULL;
+
+  if(m_MeshView)
+    ui->render->SetOutput(NULL);
+
+  m_Ctx.Replay().BlockInvoke([output](IReplayController *) { output->Shutdown(); });
+}
+
 void BufferViewer::OnCaptureLoaded()
 {
   Reset();
 
   if(!m_MeshView)
     return;
-
-  // Avoid creating a Vulkan mesh preview output on the affected Intel driver.
-  // Buffer inspection remains available without the preview renderer.
-  if(m_Ctx.APIProps().pipelineType == GraphicsAPI::Vulkan)
-  {
-    ui->render->SetOutput(NULL);
-    ui->render->hide();
-    return;
-  }
 
   WindowingData winData = ui->render->GetWidgetWindowingData();
 
@@ -3326,13 +3329,10 @@ void BufferViewer::FillScrolls(PopulateBufferData *bufdata)
 
 void BufferViewer::OnEventChanged(uint32_t eventId)
 {
-  // The current Intel Vulkan driver can reset the GPU when the mesh analysis
-  // path fetches post-vertex-shader data while browsing events. Keep the
-  // buffer/mesh panel available, but avoid refreshing it on Vulkan events.
-  if(m_Ctx.APIProps().pipelineType == GraphicsAPI::Vulkan)
-    return;
-
-  PopulateBufferData *bufdata = new PopulateBufferData;
+  // Keep the refresh data alive through both the replay callback and the GUI
+  // callback. This also releases it if a tagged request is removed before it
+  // starts running.
+  std::shared_ptr<PopulateBufferData> bufdata = std::make_shared<PopulateBufferData>();
 
   m_Sequence++;
   bufdata->sequence = m_Sequence;
@@ -3352,7 +3352,7 @@ void BufferViewer::OnEventChanged(uint32_t eventId)
   }
   else
   {
-    FillScrolls(bufdata);
+    FillScrolls(bufdata.get());
   }
 
   // remove any pending scrolls, which have been applied. If nothing changes over the data
@@ -3398,7 +3398,7 @@ void BufferViewer::OnEventChanged(uint32_t eventId)
       // GS Out doesn't use primitive restart because it is post-expansion
     }
 
-    ConfigureColumns(m_Ctx, bufdata);
+    ConfigureColumns(m_Ctx, bufdata.get());
 
     Viewport vp = m_Ctx.CurPipelineState().GetViewport(0);
 
@@ -3534,12 +3534,10 @@ void BufferViewer::OnEventChanged(uint32_t eventId)
 
   QPointer<BufferViewer> me(this);
 
-  m_Ctx.Replay().AsyncInvoke([this, me, bufdata](IReplayController *r) {
+  m_Ctx.Replay().AsyncInvoke(lit("BufferViewerEvent%1").arg((qulonglong)(void *)this),
+                             [this, me, bufdata](IReplayController *r) {
     if(!me)
-    {
-      delete bufdata;
       return;
-    }
 
     BufferData *buf = NULL;
 
@@ -3547,9 +3545,22 @@ void BufferViewer::OnEventChanged(uint32_t eventId)
     {
       if(bufdata->meshDispatch)
       {
-        bufdata->postOut1 = r->GetPostVSData(0, bufdata->inConfig.curView, MeshDataStage::TaskOut);
-        bufdata->postOut2 = r->GetPostVSData(0, bufdata->inConfig.curView, MeshDataStage::MeshOut);
+        if(m_Ctx.APIProps().pipelineType != GraphicsAPI::Vulkan)
+        {
+          bufdata->postOut1 =
+              r->GetPostVSData(0, bufdata->inConfig.curView, MeshDataStage::TaskOut);
+          bufdata->postOut2 =
+              r->GetPostVSData(0, bufdata->inConfig.curView, MeshDataStage::MeshOut);
+        }
 
+        if(m_Ctx.APIProps().pipelineType == GraphicsAPI::Vulkan)
+        {
+          bufdata->out1Config.statusString =
+              tr("Vulkan mesh shader post-output preview is disabled for safety");
+          bufdata->out2Config.statusString = bufdata->out1Config.statusString;
+        }
+        else
+        {
         const uint32_t vertsPerPrim = RENDERDOC_NumVerticesPerPrimitive(bufdata->postOut2.topology);
 
         // apply mesh/task filtering to mesh data here, which will also propagate to preview
@@ -3638,23 +3649,24 @@ void BufferViewer::OnEventChanged(uint32_t eventId)
           }
         }
 
-        RT_FetchMeshPipeData(r, m_Ctx, bufdata);
+        RT_FetchMeshPipeData(r, m_Ctx, bufdata.get());
+        }
       }
       else
       {
-        bufdata->postOut1 = r->GetPostVSData(bufdata->inConfig.curInstance,
-                                             bufdata->inConfig.curView, MeshDataStage::VSOut);
-        bufdata->postOut2 = r->GetPostVSData(bufdata->inConfig.curInstance,
-                                             bufdata->inConfig.curView, MeshDataStage::GSOut);
+        if(m_Ctx.APIProps().pipelineType != GraphicsAPI::Vulkan)
+        {
+          bufdata->postOut1 = r->GetPostVSData(bufdata->inConfig.curInstance,
+                                               bufdata->inConfig.curView, MeshDataStage::VSOut);
+          bufdata->postOut2 = r->GetPostVSData(bufdata->inConfig.curInstance,
+                                               bufdata->inConfig.curView, MeshDataStage::GSOut);
+        }
 
-        RT_FetchVertexPipeData(r, m_Ctx, bufdata);
+        RT_FetchVertexPipeData(r, m_Ctx, bufdata.get());
       }
 
       if(!me)
-      {
-        delete bufdata;
         return;
-      }
     }
     else
     {
@@ -3746,7 +3758,6 @@ void BufferViewer::OnEventChanged(uint32_t eventId)
       if(!me)
       {
         delete buf;
-        delete bufdata;
         return;
       }
     }
@@ -3765,7 +3776,6 @@ void BufferViewer::OnEventChanged(uint32_t eventId)
     GUIInvoke::call(this, [this, bufdata]() {
       if(bufdata->sequence != m_Sequence)
       {
-        delete bufdata;
         return;
       }
 
@@ -3821,7 +3831,7 @@ void BufferViewer::OnEventChanged(uint32_t eventId)
 
       UpdateStageDataControls();
 
-      populateBBox(bufdata);
+      populateBBox(bufdata.get());
 
       UI_ConfigureFormats();
       UpdateCurrentMeshConfig();
@@ -4022,9 +4032,6 @@ void BufferViewer::OnEventChanged(uint32_t eventId)
           ui->inTable->setIndexWidget(m_ModelIn->index(MaxVisibleRows, 1), MakeNextPageButton());
         }
       }
-
-      // we're done with it, the buffer configurations are individually copied/refcounted
-      delete bufdata;
 
       INVOKE_MEMFN(RT_UpdateAndDisplay);
     });
@@ -5044,7 +5051,7 @@ void BufferViewer::render_clicked(QMouseEvent *e)
     QPointer<BufferViewer> me(this);
 
     m_Ctx.Replay().AsyncInvoke(lit("PickVertex"), [this, me, curpos](IReplayController *r) {
-      if(!me)
+      if(!me || !m_Output)
         return;
 
       uint32_t instanceSelected = 0;
@@ -5756,7 +5763,7 @@ bool BufferViewer::isMeshDraw()
 
 void BufferViewer::Reset()
 {
-  m_Output = NULL;
+  ShutdownOutput();
 
   configureDrawRange();
 
