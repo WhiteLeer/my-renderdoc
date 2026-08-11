@@ -28,6 +28,7 @@
 #include <QProgressDialog>
 #include "CaptureContext.h"
 #include "QRDUtils.h"
+#include "capture_variant.h"
 
 ReplayManager::ReplayManager()
 {
@@ -398,7 +399,7 @@ void ReplayManager::ReopenCaptureFile(const QString &path)
 {
   if(!m_CaptureFile)
     m_CaptureFile = RENDERDOC_OpenCaptureFile();
-  m_CaptureFile->OpenFile(path, "rdc", NULL);
+  m_CaptureFile->OpenFile(path, RENDERDOC_CAPTURE_FILE_EXTENSION, NULL);
 }
 
 ExecuteResult ReplayManager::ExecuteAndInject(const rdcstr &exe, const rdcstr &workingDir,
@@ -451,7 +452,8 @@ void ReplayManager::run(int proxyRenderer, const QString &capturefile, const Rep
   {
     m_CaptureFile = RENDERDOC_OpenCaptureFile();
 
-    m_CreateResult = m_CaptureFile->OpenFile(capturefile, "rdc", NULL);
+    m_CreateResult =
+        m_CaptureFile->OpenFile(capturefile, RENDERDOC_CAPTURE_FILE_EXTENSION, NULL);
 
     if(m_CreateResult.OK())
       rdctie(m_CreateResult, m_Renderer) = m_CaptureFile->OpenCapture(opts, progress);
