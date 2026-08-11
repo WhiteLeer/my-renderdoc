@@ -23,6 +23,7 @@
  ******************************************************************************/
 
 #include "rdcfile.h"
+#include "core/capture_variant.h"
 #include <errno.h>
 #include "api/replay/version.h"
 #include "common/dds_readwrite.h"
@@ -240,6 +241,14 @@ void RDCFile::Open(const rdcstr &path)
   if(path.empty())
   {
     SET_ERROR_RESULT(m_Error, ResultCode::FileNotFound, "Invalid file path specified");
+    return;
+  }
+
+  if(path.endsWith(RENDERDOC_OTHER_CAPTURE_FILE_SUFFIX))
+  {
+    SET_ERROR_RESULT(m_Error, ResultCode::FileIncompatibleVersion,
+                     "This SR build only opens '%s' captures, not ZZZ captures.",
+                     RENDERDOC_CAPTURE_FILE_SUFFIX);
     return;
   }
 
@@ -642,6 +651,32 @@ void RDCFile::Init(StreamReader &reader)
                        sectionHeader.isASCII);
       return;
     }
+  }
+
+  int variantIndex = SectionIndex(RENDERDOC_CAPTURE_VARIANT_SECTION);
+  if(variantIndex >= 0)
+  {
+    const size_t variantLength = strlen(RENDERDOC_CAPTURE_VARIANT);
+    bytebuf variant;
+    variant.resize(variantLength);
+    StreamReader *variantReader = ReadSection(variantIndex);
+    bool valid = variantReader && variantReader->Read(variant.data(), variantLength) &&
+                 !variantReader->IsErrored() &&
+                 memcmp(variant.data(), RENDERDOC_CAPTURE_VARIANT, variantLength) == 0;
+    delete variantReader;
+
+    if(!valid)
+    {
+      SET_ERROR_RESULT(m_Error, ResultCode::FileIncompatibleVersion,
+                       "This capture was not produced by the SR RenderDoc build.");
+      return;
+    }
+  }
+  else if(m_File != NULL || !m_Buffer.empty())
+  {
+    SET_ERROR_RESULT(m_Error, ResultCode::FileIncompatibleVersion,
+                     "The capture is missing its SR variant marker. Recapture it with the SR build.");
+    return;
   }
 
   if(SectionIndex(SectionType::FrameCapture) == -1)

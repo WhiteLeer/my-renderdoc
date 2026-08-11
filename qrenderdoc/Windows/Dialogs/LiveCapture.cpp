@@ -37,6 +37,7 @@
 #include "Code/QRDUtils.h"
 #include "Code/Resources.h"
 #include "Code/qprocessinfo.h"
+#include "capture_variant.h"
 #include "Widgets/Extended/RDLabel.h"
 #include "Windows/MainWindow.h"
 #include "toolwindowmanager/ToolWindowManager.h"
@@ -358,8 +359,8 @@ void LiveCapture::saveCapture_triggered()
 
     if(!path.isEmpty())
     {
-      if(path.endsWith(lit(".rdc")))
-        path.chop(4);
+      if(path.endsWith(lit(RENDERDOC_CAPTURE_FILE_SUFFIX)))
+        path.chop(int(strlen(RENDERDOC_CAPTURE_FILE_SUFFIX)));
 
       // don't save duplicates if we have multiple captures from the same frame (possible if the
       // application is not presenting at all and using the API to capture)
@@ -384,7 +385,7 @@ void LiveCapture::saveCapture_triggered()
           existingFiles[cap->frameNumber] = 2;
         }
 
-        saveCapture(cap, QFormatStr("%1.rdc").arg(filename));
+        saveCapture(cap, QFormatStr("%1%2").arg(filename).arg(lit(RENDERDOC_CAPTURE_FILE_SUFFIX)));
       }
     }
   }
