@@ -39,6 +39,7 @@
 #include <QToolTip>
 #include "Code/QRDUtils.h"
 #include "Code/Resources.h"
+#include "capture_variant.h"
 #include "Widgets/Extended/RDLabel.h"
 #include "Widgets/Extended/RDMenu.h"
 #include "Widgets/ReplayOptionsSelector.h"
@@ -494,7 +495,7 @@ MainWindow::MainWindow(ICaptureContext &ctx) : QMainWindow(NULL), ui(new Ui::Mai
 
     for(const CaptureFileFormat &fmt : formats)
     {
-      if(fmt.extension == "rdc")
+      if(fmt.extension == RENDERDOC_CAPTURE_FILE_EXTENSION)
         continue;
 
       if(fmt.openSupported)
@@ -598,8 +599,9 @@ void MainWindow::on_action_Open_Capture_triggered()
 
   QString filename = RDDialog::getOpenFileName(
       this, tr("Select file to open"), m_Ctx.Config().LastCaptureFilePath,
-      tr("Capture Files (*.rdc);;Image Files (*.dds *.hdr *.exr *.bmp *.jpg "
-         "*.jpeg *.png *.tga *.gif *.psd);;All Files (*)"));
+      tr("Capture Files (*.%1);;Image Files (*.dds *.hdr *.exr *.bmp *.jpg "
+         "*.jpeg *.png *.tga *.gif *.psd);;All Files (*)")
+          .arg(lit(RENDERDOC_CAPTURE_FILE_EXTENSION)));
 
   if(!filename.isEmpty())
     LoadFromFilename(filename, false);
@@ -688,7 +690,7 @@ void MainWindow::LoadFromFilename(const QString &filename, bool temporary)
   QFileInfo path(filename);
   QString ext = path.suffix().toLower();
 
-  if(ext == lit("rdc"))
+  if(ext == lit(RENDERDOC_CAPTURE_FILE_EXTENSION))
   {
     LoadCapture(filename, m_Ctx.Config().DefaultReplayOptions, temporary, true);
   }
@@ -832,7 +834,8 @@ void MainWindow::LoadCapture(const QString &filename, const ReplayOptions &opts,
     {
       ICaptureFile *file = RENDERDOC_OpenCaptureFile();
 
-      ResultDetails result = file->OpenFile(filename, "rdc", NULL);
+      ResultDetails result =
+          file->OpenFile(filename, RENDERDOC_CAPTURE_FILE_EXTENSION, NULL);
 
       if(!result.OK())
       {
@@ -1017,7 +1020,7 @@ QString MainWindow::GetSavePath(QString title, QString filter)
     title = tr("Save Capture As");
 
   if(filter.isEmpty())
-    filter = tr("Capture Files (*.rdc)");
+    filter = tr("Capture Files (*.%1)").arg(lit(RENDERDOC_CAPTURE_FILE_EXTENSION));
 
   QString filename = RDDialog::getSaveFileName(this, title, dir, filter);
 

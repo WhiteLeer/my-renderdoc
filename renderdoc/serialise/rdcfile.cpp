@@ -23,6 +23,7 @@
  ******************************************************************************/
 
 #include "rdcfile.h"
+#include "core/capture_variant.h"
 #include <errno.h>
 #include "api/replay/version.h"
 #include "common/dds_readwrite.h"
@@ -285,6 +286,14 @@ void RDCFile::Open(const rdcstr &path)
       m_TimeFrequency = 1.0;
       return;
     }
+  }
+
+  if(!path.endsWith(RENDERDOC_CAPTURE_FILE_SUFFIX))
+  {
+    SET_ERROR_RESULT(m_Error, ResultCode::FileIncompatibleVersion,
+                     "This capture does not use the current file extension '%s'.",
+                     RENDERDOC_CAPTURE_FILE_SUFFIX);
+    return;
   }
 
   FileIO::fseek64(m_File, 0, SEEK_END);
@@ -642,6 +651,32 @@ void RDCFile::Init(StreamReader &reader)
                        sectionHeader.isASCII);
       return;
     }
+  }
+
+  int variantIndex = SectionIndex(RENDERDOC_CAPTURE_VARIANT_SECTION);
+  if(variantIndex >= 0)
+  {
+    const size_t variantLength = strlen(RENDERDOC_CAPTURE_VARIANT);
+    bytebuf variant;
+    variant.resize(variantLength);
+    StreamReader *variantReader = ReadSection(variantIndex);
+    bool valid = variantReader && variantReader->Read(variant.data(), variantLength) &&
+                 !variantReader->IsErrored() &&
+                 memcmp(variant.data(), RENDERDOC_CAPTURE_VARIANT, variantLength) == 0;
+    delete variantReader;
+
+    if(!valid)
+    {
+      SET_ERROR_RESULT(m_Error, ResultCode::FileIncompatibleVersion,
+                       "This capture was not produced by the current RenderDoc variant.");
+      return;
+    }
+  }
+  else if(m_File != NULL || !m_Buffer.empty())
+  {
+    SET_ERROR_RESULT(m_Error, ResultCode::FileIncompatibleVersion,
+                     "The capture is missing its variant marker. Recapture it with the matching build.");
+    return;
   }
 
   if(SectionIndex(SectionType::FrameCapture) == -1)

@@ -29,6 +29,7 @@
 #include "api/replay/version.h"
 #include "common/common.h"
 #include "common/threading.h"
+#include "core/capture_variant.h"
 #include "core/settings.h"
 #include "hooks/hooks.h"
 #include "jpeg-compressor/jpge.h"
@@ -1673,7 +1674,8 @@ RDCFile *RenderDoc::CreateRDC(RDCDriver driver, uint32_t frameNum, const FramePi
   if(frameNum == ~0U)
     suffix = "_capture";
 
-  m_CurrentLogFile = StringFormat::Fmt("%s%s.rdc", m_CaptureFileTemplate.c_str(), suffix.c_str());
+  m_CurrentLogFile = StringFormat::Fmt("%s%s%s", m_CaptureFileTemplate.c_str(), suffix.c_str(),
+                                       RENDERDOC_CAPTURE_FILE_SUFFIX);
 
   // make sure we don't stomp another capture if we make multiple captures in the same frame.
   {
@@ -1683,8 +1685,9 @@ RDCFile *RenderDoc::CreateRDC(RDCDriver driver, uint32_t frameNum, const FramePi
             return o.path == m_CurrentLogFile;
           }) != m_Captures.end())
     {
-      m_CurrentLogFile =
-          StringFormat::Fmt("%s%s_%d.rdc", m_CaptureFileTemplate.c_str(), suffix.c_str(), altnum);
+      m_CurrentLogFile = StringFormat::Fmt("%s%s_%d%s", m_CaptureFileTemplate.c_str(),
+                                           suffix.c_str(), altnum,
+                                           RENDERDOC_CAPTURE_FILE_SUFFIX);
       altnum++;
     }
   }
@@ -1879,7 +1882,7 @@ rdcarray<CaptureFileFormat> RenderDoc::GetCaptureFileFormats()
 
   {
     CaptureFileFormat rdc;
-    rdc.extension = "rdc";
+    rdc.extension = RENDERDOC_CAPTURE_FILE_EXTENSION;
     rdc.name = "Native RDC capture file format.";
     rdc.description = "The format produced by frame-captures from applications directly.";
     rdc.openSupported = true;
@@ -2140,8 +2143,10 @@ void RenderDoc::SetCaptureFileTemplate(const rdcstr &pathtemplate)
 
   m_CaptureFileTemplate = pathtemplate;
 
-  if(m_CaptureFileTemplate.length() > 4 &&
-     m_CaptureFileTemplate.substr(m_CaptureFileTemplate.length() - 4) == ".rdc")
+  if(m_CaptureFileTemplate.endsWith(RENDERDOC_CAPTURE_FILE_SUFFIX))
+    m_CaptureFileTemplate = m_CaptureFileTemplate.substr(
+        0, m_CaptureFileTemplate.length() - strlen(RENDERDOC_CAPTURE_FILE_SUFFIX));
+  else if(m_CaptureFileTemplate.endsWith(".rdc"))
     m_CaptureFileTemplate = m_CaptureFileTemplate.substr(0, m_CaptureFileTemplate.length() - 4);
 
   FileIO::CreateParentDirectory(m_CaptureFileTemplate);
@@ -2212,6 +2217,19 @@ void RenderDoc::FinishCaptureWriting(RDCFile *rdc, uint32_t frameNumber)
 
       w->Finish();
 
+      delete w;
+    }
+
+    // Mark the capture so the SR and ZZZ custom builds can reject each other's files before
+    // entering incompatible replay code.
+    {
+      SectionProperties props = {};
+      props.type = SectionType::Unknown;
+      props.name = RENDERDOC_CAPTURE_VARIANT_SECTION;
+      props.version = 1;
+      StreamWriter *w = rdc->WriteSection(props);
+      w->Write(RENDERDOC_CAPTURE_VARIANT, strlen(RENDERDOC_CAPTURE_VARIANT));
+      w->Finish();
       delete w;
     }
 
