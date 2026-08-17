@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WindowsPerformanceRecorder Version="1.0" Author="RenderTest SR44 diagnostics">
+  <Profiles>
+    <EventCollector Id="SR44Collector" Name="SR44 process lifecycle">
+      <BufferSize Value="64" />
+      <Buffers Value="64" />
+    </EventCollector>
+    <EventProvider Id="KernelProcess" Name="Microsoft-Windows-Kernel-Process" Level="5" Stack="false">
+      <Keywords>
+        <Keyword Value="0x10" />
+        <Keyword Value="0x20" />
+        <Keyword Value="0x40" />
+      </Keywords>
+    </EventProvider>
+    <Profile Id="SR44Process.Light.File" Name="SR44Process" Description="Lightweight process, thread, and image lifecycle trace" LoggingMode="File" DetailLevel="Light">
+      <Collectors>
+        <EventCollectorId Value="SR44Collector">
+          <EventProviders>
+            <EventProviderId Value="KernelProcess" />
+          </EventProviders>
+        </EventCollectorId>
+      </Collectors>
+    </Profile>
+  </Profiles>
+</WindowsPerformanceRecorder>

@@ -29,7 +29,28 @@
 #include "common/common.h"
 #include "core/core.h"
 #include "hooks/hooks.h"
+#include "os/win32/sr44_diagnostics.h"
 #include "strings/string_utils.h"
+
+#include <cstdio>
+
+static LONG WINAPI SR44UnhandledExceptionFilter(EXCEPTION_POINTERS *info)
+{
+  if(info && info->ExceptionRecord)
+  {
+    char details[160] = {};
+    snprintf(details, sizeof(details), "code=0x%08lX flags=0x%08lX address=%p",
+             info->ExceptionRecord->ExceptionCode, info->ExceptionRecord->ExceptionFlags,
+             info->ExceptionRecord->ExceptionAddress);
+    LogSR44LaunchStage("unhandled_exception", details);
+  }
+  else
+  {
+    LogSR44LaunchStage("unhandled_exception", "exception record unavailable");
+  }
+
+  return EXCEPTION_CONTINUE_SEARCH;
+}
 
 static BOOL add_hooks()
 {
@@ -49,8 +70,8 @@ static BOOL add_hooks()
     return TRUE;
   }
 
-  // search for an exported symbol with this name, typically renderdoc__replay__marker
-  if(LibraryHooks::Detect(STRINGIZE(RDOC_BASE_NAME) "__replay__marker"))
+  // search for an exported symbol with this name, typically rendertest__replay__marker
+  if(LibraryHooks::Detect("rendertest__replay__marker"))
   {
     RDCDEBUG("Not creating hooks - in replay app");
 
@@ -63,7 +84,13 @@ static BOOL add_hooks()
     return true;
   }
 
+  if(IsDebuggerPresent())
+    LogSR44LaunchStage("debugger_present", "target reports a debugger attached");
+  SetUnhandledExceptionFilter(SR44UnhandledExceptionFilter);
+
   RenderDoc::Inst().Initialise();
+
+  LogSR44LaunchStage("target_dll_initialise", "RenderDoc::Initialise completed");
 
   RDCLOG("Loading into %ls", curFile);
 

@@ -1,0 +1,12 @@
+.symfix
+.sympath+ srv*C:\Symbols*https://msdl.microsoft.com/download/symbols
+.reload /f
+sxi 80000003
+sxi 80000002
+bp ntdll!NtTerminateProcess ".echo EXIT ntdll!NtTerminateProcess; r rcx; r rdx; kv 40; gc"
+bp ntdll!RtlExitUserProcess ".echo EXIT ntdll!RtlExitUserProcess; r rcx; kv 40; gc"
+bp kernelbase!TerminateProcess ".echo EXIT kernelbase!TerminateProcess; r rcx; r rdx; kv 40; gc"
+bp kernelbase!RaiseFailFastException ".echo EXIT kernelbase!RaiseFailFastException; kv 40; gc"
+sxe c0000409
+sxe c0000005
+g
