@@ -244,14 +244,6 @@ void RDCFile::Open(const rdcstr &path)
     return;
   }
 
-  if(path.endsWith(RENDERDOC_OTHER_CAPTURE_FILE_SUFFIX))
-  {
-    SET_ERROR_RESULT(m_Error, ResultCode::FileIncompatibleVersion,
-                     "This ZZZ build only opens '%s' captures, not SR captures.",
-                     RENDERDOC_CAPTURE_FILE_SUFFIX);
-    return;
-  }
-
   RDCLOG("Opening RDCFile %s", path.c_str());
 
   m_Untrusted = FileIO::IsUntrustedFile(path);
@@ -294,6 +286,14 @@ void RDCFile::Open(const rdcstr &path)
       m_TimeFrequency = 1.0;
       return;
     }
+  }
+
+  if(!path.endsWith(RENDERDOC_CAPTURE_FILE_SUFFIX))
+  {
+    SET_ERROR_RESULT(m_Error, ResultCode::FileIncompatibleVersion,
+                     "This capture does not use the current file extension '%s'.",
+                     RENDERDOC_CAPTURE_FILE_SUFFIX);
+    return;
   }
 
   FileIO::fseek64(m_File, 0, SEEK_END);
@@ -668,14 +668,14 @@ void RDCFile::Init(StreamReader &reader)
     if(!valid)
     {
       SET_ERROR_RESULT(m_Error, ResultCode::FileIncompatibleVersion,
-                       "This capture was not produced by the ZZZ RenderDoc build.");
+                       "This capture was not produced by the current RenderDoc variant.");
       return;
     }
   }
   else if(m_File != NULL || !m_Buffer.empty())
   {
     SET_ERROR_RESULT(m_Error, ResultCode::FileIncompatibleVersion,
-                     "The capture is missing its ZZZ variant marker. Recapture it with the ZZZ build.");
+                     "The capture is missing its variant marker. Recapture it with the matching build.");
     return;
   }
 

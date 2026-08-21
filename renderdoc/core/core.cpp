@@ -1122,14 +1122,8 @@ void RenderDoc::StartFrameCapture(DeviceOwnedWindow devWnd)
   IFrameCapturer *frameCap = MatchFrameCapturer(devWnd);
   if(frameCap)
   {
-    RDCLOG("StartFrameCapture matched device=%p window=%p", devWnd.device, devWnd.windowHandle);
     frameCap->StartFrameCapture(devWnd);
     m_CapturesActive++;
-  }
-  else
-  {
-    RDCWARN("StartFrameCapture found no capturer for device=%p window=%p", devWnd.device,
-            devWnd.windowHandle);
   }
 }
 
@@ -1491,8 +1485,6 @@ void RenderDoc::QueueCapture(uint32_t frameNumber)
 bool RenderDoc::ShouldTriggerCapture(uint32_t frameNumber)
 {
   bool ret = m_Cap > 0;
-  bool queuedCapture = false;
-
   if(m_Cap > 0)
     m_Cap--;
 
@@ -1508,7 +1500,6 @@ bool RenderDoc::ShouldTriggerCapture(uint32_t frameNumber)
     {
       // we want to capture the next frame
       ret = true;
-      queuedCapture = true;
     }
     else
     {
@@ -1516,10 +1507,6 @@ bool RenderDoc::ShouldTriggerCapture(uint32_t frameNumber)
       m_QueuedFrameCaptures.push_back(*it);
     }
   }
-
-  if(ret)
-    RDCLOG("Capture request consumed at frame=%u directRemaining=%u queued=%u", frameNumber, m_Cap,
-           queuedCapture ? 1U : 0U);
 
   return ret;
 }
@@ -2232,8 +2219,8 @@ void RenderDoc::FinishCaptureWriting(RDCFile *rdc, uint32_t frameNumber)
       delete w;
     }
 
-    // Mark the capture so the ZZZ and SR custom builds can reject each other's files before
-    // entering incompatible replay code.
+    // Mark the capture so game-specific RenderDoc builds can reject captures
+    // produced by an incompatible variant before entering replay code.
     {
       SectionProperties props = {};
       props.type = SectionType::Unknown;

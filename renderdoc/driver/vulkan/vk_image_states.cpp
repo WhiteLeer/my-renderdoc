@@ -23,7 +23,6 @@
  ******************************************************************************/
 
 #include "vk_resources.h"
-#include "common/threading.h"
 
 ImageSubresourceRange ImageInfo::FullRange() const
 {
@@ -1025,11 +1024,7 @@ void ImageState::RecordBarrier(VkImageMemoryBarrier barrier, uint32_t queueFamil
      barrier.dstQueueFamilyIndex == VK_QUEUE_FAMILY_EXTERNAL ||
      barrier.dstQueueFamilyIndex == VK_QUEUE_FAMILY_FOREIGN_EXT)
   {
-    static int32_t externalQueueFamilyWarnings = 0;
-    uint32_t warningCount = (uint32_t)Atomic::Inc32(&externalQueueFamilyWarnings);
-    if(warningCount == 1 || (warningCount % 1024) == 0)
-      RDCDEBUG("External/foreign queue families are not supported (occurrence %u)",
-               warningCount);
+    RDCDEBUG("External/foreign queue families are not supported");
     return;
   }
   if(GetImageInfo().sharingMode == VK_SHARING_MODE_CONCURRENT)

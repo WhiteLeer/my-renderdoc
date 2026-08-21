@@ -356,8 +356,6 @@ void RenderDoc::TargetControlClientThread(uint32_t version, Network::Socket *cli
         READ_DATA_SCOPE();
         SERIALISE_ELEMENT(numFrames);
 
-        RDCLOG("Target control requested capture: frames=%u ident=%u", numFrames,
-               RenderDoc::Inst().GetTargetControlIdent());
         RenderDoc::Inst().TriggerCapture(numFrames);
       }
       else if(type == ePacket_QueueCapture)
