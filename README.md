@@ -1,13 +1,16 @@
-# my-renderdoc
+# SR-4.4 RenderDoc Experiment
 
-This repository is a personal baseline mirror derived from [baldurk/renderdoc](https://github.com/baldurk/renderdoc).
+This branch records the RenderDoc injection investigation for the SR 4.4 PC
+client.
 
-- Upstream repository: `https://github.com/baldurk/renderdoc.git`
-- Imported upstream commit: `2fc0bc04cb95499635f63986a55bc6f67849dd9f`
-- Imported upstream version: `v1.45`
+## Status
 
-Branch policy:
+The PC client is protected heavily enough that a reliable RenderDoc injection
+path requires substantial reverse-engineering effort. Several approaches were
+tested, including suspended-process injection and diagnostic probes, but none
+produced a stable, repeatable solution. The investigation also had to proceed
+without AI assistance at the time, so this branch is preserved as an
+incomplete experiment rather than presented as a finished solution.
 
-- `main` is kept as the baseline reference branch only
-- Actual customizations and game-version-specific modifications are developed in separate branches
-- Experimental or long-term maintained forks should not be committed directly to `main`
+If you have a reproducible approach or relevant experience with the PC-side
+injection problem, feel free to contact me to discuss it.
