@@ -5,6 +5,8 @@ Honkai: Star Rail (HSR) running inside MuMu. It is not the HSR asset extractor;
 its output is the `.srrdc` capture used for later HSR resource and shader
 analysis.
 
+![HSR RenderDoc Mesh Preview](docs/images/hsr-renderdoc-mesh-preview.png)
+
 ## What Changed
 
 - Keeps EGL hooks enabled for MuMu's host EGL/GLES bridge, which is required to
@@ -12,8 +14,8 @@ analysis.
 - Uses the `.srrdc` extension and embeds the technical `SR` variant marker for
   compatibility with existing captures.
 - Rejects captures without the matching embedded variant marker before replay.
-- Updates the RenderDoc UI and command-line tools to open, save, and export
-  `.srrdc` files.
+- Updates the RenderDoc UI and command-line tools to open and save `.srrdc`
+  files.
 - Adds MuMu capture diagnostics and avoids null remote-device controllers during
   device enumeration.
 
@@ -64,14 +66,23 @@ PowerShell.exe -NoProfile -ExecutionPolicy Bypass -File `
 Use the HSR build to open `.srrdc` files. Renaming a capture does not change its
 embedded variant marker; captures must be opened with the matching build.
 
+## Mesh Preview Stability
+
+The Vulkan `VK_ERROR_DEVICE_LOST` crash that could occur when opening Mesh
+Preview or switching DRAW events has been fixed in the current build.
+
+For Vulkan captures, the unstable post-output replay path is intentionally
+disabled in Mesh Preview. This includes replaying vertex-shader/geometry-shader
+post-VS outputs and task/mesh-shader post outputs. The normal input vertex data
+path, texture and output viewing, pipeline inspection, and DRAW/event
+navigation remain available.
+
+This keeps the capture analysis workflow usable while avoiding the replay
+operation that could trigger a GPU watchdog reset on the affected driver and
+capture combination.
+
 ## Known Limitations
 
-Replay stability is still under investigation. Switching frames rapidly after
-opening an `.srrdc` capture can trigger a GPU device-lost error or crash. Slower
-navigation reduces the risk but does not eliminate it.
-
-The issue is not present in every capture. Some captures open normally and
-provide the complete rendering data needed for analysis, which is why this build
-and selected captures are published for research and validation. Keep a backup
-of important captures and avoid rapid frame switching until the replay issue is
-resolved.
+Vulkan post-output mesh preview is not currently available because that replay
+path is disabled for stability. Captures should still be opened with the
+matching build and important captures should be backed up before analysis.
