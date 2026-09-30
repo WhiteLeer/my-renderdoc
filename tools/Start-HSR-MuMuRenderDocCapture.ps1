@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 function Resolve-RenderDocBin([string]$Path, [string]$DefaultPath) {
-  if([string]::IsNullOrWhiteSpace($Path)) { $Path = $env:SR_RENDERDOC_BIN }
+  if([string]::IsNullOrWhiteSpace($Path)) { $Path = $env:HSR_RENDERDOC_BIN }
   if([string]::IsNullOrWhiteSpace($Path)) { $Path = $DefaultPath }
 
   $candidate = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
@@ -83,18 +83,18 @@ function Show-PathDialog([string]$InitialMuMuRoot, [string]$InitialRenderDocBin)
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-public static class SrRenderDocDpi {
+public static class HsrRenderDocDpi {
   [DllImport("user32.dll")]
   public static extern bool SetProcessDPIAware();
 }
 '@ -ErrorAction Stop
-    [SrRenderDocDpi]::SetProcessDPIAware() | Out-Null
+    [HsrRenderDocDpi]::SetProcessDPIAware() | Out-Null
   } catch {
     # Older Windows versions may not expose the DPI API; the form remains usable.
   }
 
   $form = New-Object System.Windows.Forms.Form
-  $form.Text = 'SR RenderDoc + MuMu'
+  $form.Text = 'HSR RenderDoc + MuMu'
   $form.StartPosition = 'CenterScreen'
   $form.FormBorderStyle = 'FixedDialog'
   $form.MaximizeBox = $false
@@ -135,7 +135,7 @@ public static class SrRenderDocDpi {
   }.GetNewClosure()))
 
   $renderDocLabel = New-Object System.Windows.Forms.Label
-  $renderDocLabel.Text = 'SR renderdoccmd.exe'
+  $renderDocLabel.Text = 'HSR renderdoccmd.exe'
   $renderDocLabel.AutoSize = $true
   $renderDocLabel.Margin = New-Object System.Windows.Forms.Padding(0, 5, 10, 3)
 
@@ -151,7 +151,7 @@ public static class SrRenderDocDpi {
   $renderDocBrowse.Margin = New-Object System.Windows.Forms.Padding(0, 1, 0, 1)
   $renderDocBrowse.Add_Click(({
     $dialog = New-Object System.Windows.Forms.OpenFileDialog
-    $dialog.Title = 'Select SR renderdoccmd.exe'
+    $dialog.Title = 'Select HSR renderdoccmd.exe'
     $dialog.Filter = 'renderdoccmd.exe|renderdoccmd.exe|Executable files|*.exe'
     $dialog.CheckFileExists = $true
     $current = Get-Item -LiteralPath $renderDocBox.Text -ErrorAction SilentlyContinue
@@ -246,7 +246,7 @@ $localAppData = if([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
 } else {
   $env:LOCALAPPDATA
 }
-$settingsPath = Join-Path $localAppData 'SR-RenderDoc\launcher-settings.json'
+$settingsPath = Join-Path $localAppData 'HSR-RenderDoc\launcher-settings.json'
 $settings = Read-LauncherSettings $settingsPath
 
 $initialMuMuRoot = if(![string]::IsNullOrWhiteSpace($env:MUMU_ROOT)) {
@@ -256,8 +256,8 @@ $initialMuMuRoot = if(![string]::IsNullOrWhiteSpace($env:MUMU_ROOT)) {
 } else {
   $defaultMuMuExecutable
 }
-$initialRenderDocBin = if(![string]::IsNullOrWhiteSpace($env:SR_RENDERDOC_BIN)) {
-  $env:SR_RENDERDOC_BIN
+$initialRenderDocBin = if(![string]::IsNullOrWhiteSpace($env:HSR_RENDERDOC_BIN)) {
+  $env:HSR_RENDERDOC_BIN
 } elseif($settings -and ![string]::IsNullOrWhiteSpace([string]$settings.RenderDocBin)) {
   Get-RememberedExecutablePath ([string]$settings.RenderDocBin) 'renderdoccmd.exe'
 } else {
@@ -297,8 +297,8 @@ $mumuWorkDir = Split-Path $mumuHost
 $renderDocCmd = Join-Path $renderDocBin 'renderdoccmd.exe'
 $renderDocDll = Join-Path $renderDocBin 'renderdoc.dll'
 $renderDocJson = Join-Path $renderDocBin 'renderdoc.json'
-$captureTemplate = Join-Path $outputDir 'mumu-host_sr'
-$logPath = Join-Path $outputDir 'launcher-sr.log'
+$captureTemplate = Join-Path $outputDir 'mumu-host_hsr'
+$logPath = Join-Path $outputDir 'launcher-hsr.log'
 
 function Write-LauncherLog([string]$Message) {
   $line = '[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
@@ -306,16 +306,30 @@ function Write-LauncherLog([string]$Message) {
   Write-Host $line
 }
 
-function Invoke-MuMu([string[]]$Arguments) {
+function Invoke-MuMu([string[]]$Arguments, [switch]$IgnoreFailure) {
   $result = (& $mumuCli @Arguments 2>&1 | Out-String).Trim()
   if($result) { Write-LauncherLog $result }
+  if($LASTEXITCODE -ne 0 -and !$IgnoreFailure) {
+    throw "MuMu command failed (exit code $LASTEXITCODE): mumu-cli $($Arguments -join ' ')`n$result"
+  }
+  return $result
 }
 
 function Wait-ForProcess([string]$Name, [int]$TimeoutSeconds = 30) {
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   do {
     $process = Get-CimInstance Win32_Process -Filter "Name='$Name'" -ErrorAction SilentlyContinue |
-      Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($mumuRoot, [StringComparison]::OrdinalIgnoreCase) }
+      Where-Object {
+        if(!$_.ExecutablePath) { return $false }
+        if($_.ExecutablePath.StartsWith($mumuRoot, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        # MuMu may report the legacy install path when the relocated install
+        # is reached through a directory junction.
+        if($Name -ieq 'MuMuNxDevice.exe' -and
+           $_.ExecutablePath.EndsWith('\nx_device\15.0\shell\MuMuNxDevice.exe', [StringComparison]::OrdinalIgnoreCase)) {
+          return $true
+        }
+        return $false
+      }
     if($process) { return $process }
     Start-Sleep -Milliseconds 500
   } while((Get-Date) -lt $deadline)
@@ -334,11 +348,15 @@ if(!(Test-Path -LiteralPath $mumuCli) -or !(Test-Path -LiteralPath $mumuHost)) {
 }
 if(!(Test-Path -LiteralPath $renderDocCmd) -or !(Test-Path -LiteralPath $renderDocDll) -or
    !(Test-Path -LiteralPath $renderDocJson)) {
-  throw "SR RenderDoc build is incomplete under $renderDocBin."
+  throw "HSR RenderDoc build is incomplete under $renderDocBin."
 }
 
+# MuMu's VirtualBox service requires a writable per-user root directory.
+$mumuServiceRoot = Join-Path $env:USERPROFILE '.MUMUNX'
+New-Item -ItemType Directory -Force -Path $mumuServiceRoot | Out-Null
+
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
-Set-Content -LiteralPath $logPath -Value 'MuMu RenderDoc launcher: SR'
+Set-Content -LiteralPath $logPath -Value 'MuMu RenderDoc launcher: HSR'
 Write-LauncherLog "Using $renderDocBin"
 
 # Replace only the two local RenderDoc layer entries; all other Vulkan layers stay intact.
@@ -356,14 +374,14 @@ try {
     Remove-ItemProperty -Path $vulkanLayerKey -Name $renderDocJson -ErrorAction SilentlyContinue
   }
   New-ItemProperty -Path $vulkanLayerKey -Name $renderDocJson -PropertyType DWord -Value 0 -Force | Out-Null
-  Write-LauncherLog "Registered SR Vulkan layer: $renderDocJson"
+  Write-LauncherLog "Registered HSR Vulkan layer: $renderDocJson"
 } catch {
   throw "Cannot update the 64-bit Vulkan layer registration. Run this BAT as Administrator. $($_.Exception.Message)"
 }
 
 # MuMu must be restarted so no process retains another RenderDoc DLL.
-Invoke-MuMu @('control', '--vmindex', $VmIndex, 'shutdown')
-Invoke-MuMu @('main', 'close')
+Invoke-MuMu @('control', '--vmindex', $VmIndex, 'shutdown') -IgnoreFailure
+Invoke-MuMu @('main', 'close') -IgnoreFailure
 Start-Sleep -Seconds 6
 
 $renderDocBins = @($renderDocBin)
@@ -388,16 +406,27 @@ $arguments = @(
   '--opt-hook-children', '--opt-ref-all-resources', $mumuHost
 )
 $renderDocProcess = Start-Process -FilePath $renderDocCmd -WorkingDirectory $mumuWorkDir -ArgumentList $arguments -PassThru
-Write-LauncherLog "Started SR renderdoccmd.exe (PID $($renderDocProcess.Id))"
+Write-LauncherLog "Started HSR renderdoccmd.exe (PID $($renderDocProcess.Id))"
 Start-Sleep -Seconds 5
 
 $main = Wait-ForProcess 'MuMuNxMain.exe'
-if(!$main) { throw 'MuMuNxMain.exe did not start under SR RenderDoc.' }
+if(!$main) { throw 'MuMuNxMain.exe did not start under HSR RenderDoc.' }
 Write-LauncherLog "MuMu main process started (PID $($main.ProcessId))."
 
-Invoke-MuMu @('control', '--vmindex', $VmIndex, '--version', '15', 'launch')
+$launchResult = Invoke-MuMu @('control', '--vmindex', $VmIndex, '--version', '15', 'launch')
+$launchJson = $launchResult | ConvertFrom-Json -ErrorAction SilentlyContinue
+if($launchJson -and $launchJson.errcode -and [int]$launchJson.errcode -ne 0) {
+  throw "MuMu failed to launch vmindex ${VmIndex}: $($launchJson.errmsg)"
+}
 $device = Wait-ForProcess 'MuMuNxDevice.exe' 45
-if(!$device) { throw 'MuMuNxDevice.exe did not start.' }
+if(!$device) {
+  $state = (& $mumuCli 'info' '--vmindex' $VmIndex 2>&1 | Out-String).Trim()
+  $stateJson = $state | ConvertFrom-Json -ErrorAction SilentlyContinue
+  if($stateJson -and $stateJson.pid -and [int]$stateJson.pid -gt 0 -and $stateJson.is_process_started) {
+    $device = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$stateJson.pid)" -ErrorAction SilentlyContinue
+  }
+  if(!$device) { throw "MuMuNxDevice.exe did not start. MuMu state: $state" }
+}
 Start-Sleep -Seconds 5
 
 $allModules = @()
@@ -411,10 +440,10 @@ $wrongModule = @($allModules | Where-Object {
   $_ -and !$_.StartsWith($renderDocBin, [StringComparison]::OrdinalIgnoreCase)
 })
 if($wrongModule.Count -gt 0) {
-  throw "A non-SR RenderDoc DLL is loaded: $($wrongModule -join ', ')"
+  throw "A non-HSR RenderDoc DLL is loaded: $($wrongModule -join ', ')"
 }
 
-Write-LauncherLog "SR injection is ready. Capture template: $captureTemplate"
+Write-LauncherLog "HSR injection is ready. Capture template: $captureTemplate"
 Write-Host ''
-Write-Host 'SR RenderDoc injection is ready. Enter the SR 3D scene and capture normally.'
+Write-Host 'HSR RenderDoc injection is ready. Enter the HSR 3D scene and capture normally.'
 Write-Host "Capture files: $captureTemplate`_<NUMBER>.srrdc"

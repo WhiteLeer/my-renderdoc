@@ -1,4 +1,4 @@
-# HSR-4.4-MUMU RenderDoc
+# HSR-4.5-MUMU RenderDoc
 
 This branch is a RenderDoc build dedicated to capturing and replaying
 Honkai: Star Rail (HSR) running inside MuMu. It is not the HSR asset extractor;
@@ -11,7 +11,7 @@ analysis.
 
 - Keeps EGL hooks enabled for MuMu's host EGL/GLES bridge, which is required to
   capture the real HSR rendering instead of an empty host shell.
-- Uses the `.srrdc` extension and embeds the technical `SR` variant marker for
+- Uses the `.srrdc` extension and embeds the technical `HSR` variant marker for
   compatibility with existing captures.
 - Rejects captures without the matching embedded variant marker before replay.
 - Updates the RenderDoc UI and command-line tools to open and save `.srrdc`
@@ -33,7 +33,7 @@ MuMu must also be installed and contain `nx_main\MuMuNxMain.exe` and
 
 ## Capture HSR
 
-1. Double-click `tools\Start-SR-MuMuRenderDocCapture.bat`.
+1. Double-click `tools\Start-HSR-MuMuRenderDocCapture.bat`.
 2. In the dialog, select `MuMuNxMain.exe`.
 3. Select this build's `x64\Development\renderdoccmd.exe`.
 4. Click `Start capture` and wait for the launcher to report that injection is
@@ -48,16 +48,16 @@ options.
 
 Captures are written by default to:
 
-`D:\Unpack_Workspace\RenderDocTests\mumu-host\mumu-host_sr_<frame>.srrdc`
+`D:\Unpack_Workspace\RenderDocTests\mumu-host\mumu-host_hsr_<frame>.srrdc`
 
 The selected paths are remembered for the current Windows user at
-`%LOCALAPPDATA%\SR-RenderDoc\launcher-settings.json`.
+`%LOCALAPPDATA%\HSR-RenderDoc\launcher-settings.json`.
 
 The launcher also accepts a directory instead of an EXE. For unattended use:
 
 ```powershell
 PowerShell.exe -NoProfile -ExecutionPolicy Bypass -File `
-  .\tools\Start-SR-MuMuRenderDocCapture.ps1 `
+  .\tools\Start-HSR-MuMuRenderDocCapture.ps1 `
   -NoGui `
   -MuMuRoot 'D:\Unpack_Workspace\Games_MUMU\MuMuPlayerGlobal\nx_main\MuMuNxMain.exe' `
   -RenderDocBin 'D:\Unpack_Workspace\Base_RenderDoc\my-renderdoc\x64\Development\renderdoccmd.exe'
@@ -65,6 +65,37 @@ PowerShell.exe -NoProfile -ExecutionPolicy Bypass -File `
 
 Use the HSR build to open `.srrdc` files. Renaming a capture does not change its
 embedded variant marker; captures must be opened with the matching build.
+
+## Shader Export
+
+The command-line tool can export deduplicated shader records, reflection,
+pipeline bindings, vertex inputs and per-event metadata. It does not emit a
+fake Unity shader by default:
+
+```powershell
+renderdoccmd.exe shader-export capture.srrdc `
+  --output ShaderExports\frame `
+  --event 436 `
+  --reconstruct `
+  --spirv-cross path\to\spirv-cross.exe `
+  --export-resources
+```
+
+When the capture contains SPIR-V, `--reconstruct` produces real
+`*.reconstructed.hlsl` files through the explicitly supplied SPIRV-Cross
+binary. `--export-resources` additionally saves the textures bound at the
+selected events as DDS and bounded buffer ranges as `.bin` snapshots. The
+manifest `capture.json` records the exact shader/resource identity, snapshot
+paths and a reconstruction status for every unique shader:
+
+- `Ready`: HLSL was reconstructed and no external shader resource was reflected.
+- `NeedsBinding`: HLSL was reconstructed, but textures, buffers or material
+  values still need to be exported and bound in Unity.
+- `NeedsReview`: reconstruction was not requested or could not be validated.
+- `Unsupported`: raw shader bytes or backend disassembly were unavailable.
+
+The legacy magenta ShaderLab files are opt-in only through
+`--emit-placeholder-templates` and must not be treated as reconstructed assets.
 
 ## Mesh Preview Stability
 
