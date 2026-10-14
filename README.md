@@ -1,4 +1,8 @@
-# HSR-4.5-MUMU RenderDoc
+# HSR-4.6-MUMU RenderDoc
+
+The active client is HSR 4.6.0. Earlier HSR 4.5 captures remain offline regression
+fixtures. Capturing and replaying the new client must be validated separately;
+the branch name alone does not certify compatibility.
 
 This branch is a RenderDoc build dedicated to capturing and replaying
 Honkai: Star Rail (HSR) running inside MuMu. It is not the HSR asset extractor;
