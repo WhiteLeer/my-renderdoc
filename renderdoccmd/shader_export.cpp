@@ -9,6 +9,7 @@
 
 #include <cctype>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #if defined(_WIN32)
 #include <direct.h>
@@ -17,6 +18,7 @@
 #endif
 #include <fstream>
 #include <iomanip>
+#include <map>
 #include <set>
 #include <sstream>
 #include <string>
@@ -71,6 +73,60 @@ const char *ShaderEncodingName(ShaderEncoding encoding)
     case ShaderEncoding::Slang: return "Slang";
     default: return "Unknown";
   }
+}
+
+const char *DescriptorTypeName(DescriptorType type)
+{
+  switch(type)
+  {
+    case DescriptorType::ConstantBuffer: return "constantBuffer";
+    case DescriptorType::Sampler: return "sampler";
+    case DescriptorType::ImageSampler: return "imageSampler";
+    case DescriptorType::Image: return "image";
+    case DescriptorType::Buffer: return "buffer";
+    case DescriptorType::TypedBuffer: return "typedBuffer";
+    case DescriptorType::ReadWriteImage: return "readWriteImage";
+    case DescriptorType::ReadWriteTypedBuffer: return "readWriteTypedBuffer";
+    case DescriptorType::ReadWriteBuffer: return "readWriteBuffer";
+    case DescriptorType::AccelerationStructure: return "accelerationStructure";
+    default: return "unknown";
+  }
+}
+
+const char *TextureTypeName(TextureType type)
+{
+  switch(type)
+  {
+    case TextureType::Buffer: return "buffer";
+    case TextureType::Texture1D: return "texture1D";
+    case TextureType::Texture1DArray: return "texture1DArray";
+    case TextureType::Texture2D: return "texture2D";
+    case TextureType::TextureRect: return "textureRect";
+    case TextureType::Texture2DArray: return "texture2DArray";
+    case TextureType::Texture2DMS: return "texture2DMS";
+    case TextureType::Texture2DMSArray: return "texture2DMSArray";
+    case TextureType::Texture3D: return "texture3D";
+    case TextureType::TextureCube: return "textureCube";
+    case TextureType::TextureCubeArray: return "textureCubeArray";
+    default: return "unknown";
+  }
+}
+
+const ResourceDescription *FindResource(const rdcarray<ResourceDescription> &resources,
+                                        ResourceId id)
+{
+  for(const ResourceDescription &resource : resources)
+    if(resource.resourceId == id)
+      return &resource;
+  return NULL;
+}
+
+const TextureDescription *FindTexture(const rdcarray<TextureDescription> &textures, ResourceId id)
+{
+  for(const TextureDescription &texture : textures)
+    if(texture.resourceId == id)
+      return &texture;
+  return NULL;
 }
 
 std::string ResourceIdName(ResourceId id)
@@ -147,6 +203,98 @@ std::string TextHash(const std::string &text)
   return ContentHash(text.data(), text.size());
 }
 
+const char *ReconstructionStatusName(bool hasRawBytes, bool hasDisassembly,
+                                     bool hasExternalResources, bool reconstructed)
+{
+  if(!hasRawBytes || !hasDisassembly)
+    return "Unsupported";
+  if(reconstructed)
+    return hasExternalResources ? "NeedsBinding" : "Ready";
+  return "NeedsReview";
+}
+
+std::string ReconstructionStatusReason(bool hasRawBytes, bool hasDisassembly,
+                                       bool hasExternalResources, bool reconstructed,
+                                       bool requested, bool isSpirv,
+                                       const std::string &error)
+{
+  if(!hasRawBytes || !hasDisassembly)
+    return "raw shader bytes or backend disassembly is missing";
+  if(reconstructed && hasExternalResources)
+    return "HLSL was reconstructed; bound textures, buffers and material values still require export or binding";
+  if(reconstructed)
+    return "HLSL was reconstructed and no external shader resources were reflected";
+  if(!requested)
+    return "automatic reconstruction was not requested";
+  if(!isSpirv)
+    return "automatic reconstruction currently requires SPIR-V shader bytes";
+  if(!error.empty())
+    return error;
+  return "automatic reconstruction did not produce a validated HLSL file";
+}
+
+const char *SpirvCrossStageName(ShaderStage stage)
+{
+  switch(stage)
+  {
+    case ShaderStage::Vertex: return "vert";
+    case ShaderStage::Pixel: return "frag";
+    case ShaderStage::Geometry: return "geom";
+    case ShaderStage::Hull: return "tesc";
+    case ShaderStage::Domain: return "tese";
+    case ShaderStage::Compute: return "comp";
+    default: return NULL;
+  }
+}
+
+std::string ProcessArg(const std::string &value)
+{
+  std::string quoted = "\"";
+  for(char c : value)
+  {
+    if(c == '\\' || c == '"')
+      quoted.push_back('\\');
+    quoted.push_back(c);
+  }
+  quoted.push_back('"');
+  return quoted;
+}
+
+bool RunSpirvCross(const std::string &tool, const std::string &workingDirectory,
+                   const std::string &binaryFile, const std::string &outputFile,
+                   ShaderStage stage, const std::string &entryPoint, std::string &error)
+{
+  const char *stageName = SpirvCrossStageName(stage);
+  if(stageName == NULL)
+  {
+    error = "SPIRV-Cross does not support this shader stage in the automatic HLSL path.";
+    return false;
+  }
+
+  const std::string args = "--hlsl --shader-model 50 --stage " + std::string(stageName) +
+                           " --entry " +
+                           ProcessArg(entryPoint) + " --output " + ProcessArg(outputFile) +
+                           " " + ProcessArg(binaryFile);
+  std::string command = "cd ";
+#if defined(_WIN32)
+  command += "/d ";
+#endif
+  command += ProcessArg(workingDirectory) + " && " + ProcessArg(tool) + " " + args;
+  const int result = std::system(command.c_str());
+  if(result != 0)
+  {
+    error = "SPIRV-Cross returned a non-zero exit code.";
+    return false;
+  }
+  std::ifstream generated(JoinPath(workingDirectory, outputFile), std::ios::binary);
+  if(!generated || generated.peek() == std::ifstream::traits_type::eof())
+  {
+    error = "SPIRV-Cross exited successfully but did not produce a non-empty HLSL file.";
+    return false;
+  }
+  return true;
+}
+
 bool EnsureParentDirectory(const std::string &filename)
 {
   const size_t lastSeparator = filename.find_last_of("\\/");
@@ -202,6 +350,37 @@ bool WriteBinary(const std::string &filename, const void *data, size_t size)
   if(!file)
     return false;
   file.write(static_cast<const char *>(data), (std::streamsize)size);
+  return file.good();
+}
+
+bool AppendDrawReplayEvidence(const std::string &filename, const ActionDescription &action,
+                              const SDFile &structuredFile)
+{
+  if(!EnsureParentDirectory(filename))
+    return false;
+
+  std::ofstream file(filename, std::ios::binary | std::ios::app);
+  if(!file)
+    return false;
+
+  // ActionDescription owns the replay EID and the API event that produced it.
+  // Keep the raw file offset as a relative replay token; it is not an on-disk
+  // offset and must not be treated as a Unity object identity.
+  const APIEvent *apiEvent = action.events.empty() ? NULL : &action.events.back();
+  file << "{\"schema\":\"renderdoc.draw-replay-evidence.v1\",\"eventId\":"
+       << action.eventId << ",\"actionId\":" << action.actionId << ",\"actionFlags\":"
+       << (uint32_t)action.flags << ",\"chunkIndex\":";
+  if(apiEvent == NULL || apiEvent->chunkIndex == APIEvent::NoChunk)
+    file << "null";
+  else
+    file << apiEvent->chunkIndex;
+  file << ",\"fileOffset\":";
+  if(apiEvent == NULL)
+    file << "null";
+  else
+    file << apiEvent->fileOffset;
+  file << ",\"eventCount\":" << action.events.size() << "}\n";
+  (void)structuredFile;
   return file.good();
 }
 
@@ -285,8 +464,12 @@ private:
   std::string filename;
   std::string output;
   std::string target;
+  std::string spirvCross;
   uint32_t eventId = 0;
   bool listTargets = false;
+  bool reconstruct = false;
+  bool emitPlaceholders = false;
+  bool exportResources = false;
 
 public:
   void AddOptions(cmdline::parser &parser) override
@@ -298,12 +481,21 @@ public:
     parser.add<std::string>("target", 't',
                             "RenderDoc disassembly target; empty uses the backend default.", false,
                             "");
+    parser.add<std::string>("spirv-cross", 's',
+                            "SPIRV-Cross executable used for automatic HLSL reconstruction.",
+                            false, "");
+    parser.add("reconstruct", 'r',
+               "Run SPIRV-Cross for supported SPIR-V shader stages.");
+    parser.add("emit-placeholder-templates", 0,
+               "Also emit legacy magenta ShaderLab placeholder files.");
+    parser.add("export-resources", 0,
+               "Export bound texture DDS files and bounded buffer byte snapshots.");
     parser.add("list-targets", 'l', "List disassembly targets available for this capture and exit.");
   }
 
   const char *Description() override
   {
-    return "Export shader reflection, backend disassembly and ShaderLab reconstruction templates.";
+    return "Export deduplicated shader data, bindings and optional automatic HLSL reconstruction.";
   }
 
   bool IsInternalOnly() override { return false; }
@@ -322,7 +514,11 @@ public:
     filename = rest[0];
     output = parser.get<std::string>("output");
     target = parser.get<std::string>("target");
+    spirvCross = parser.get<std::string>("spirv-cross");
     eventId = parser.get<uint32_t>("event");
+    reconstruct = parser.exist("reconstruct");
+    emitPlaceholders = parser.exist("emit-placeholder-templates");
+    exportResources = parser.exist("export-resources");
     listTargets = parser.exist("list-targets");
     return true;
   }
@@ -366,6 +562,8 @@ public:
 
     std::vector<const ActionDescription *> actions;
     FlattenActions(controller->GetRootActions(), actions);
+    const rdcarray<ResourceDescription> &resources = controller->GetResources();
+    const rdcarray<TextureDescription> &textures = controller->GetTextures();
     std::set<std::string> exportedShaders;
     std::set<std::string> exportedVariants;
     bool wroteShader = false;
@@ -373,6 +571,13 @@ public:
     bool wroteEvent = false;
     uint32_t exportedStages = 0;
     uint32_t exportedEvents = 0;
+    std::map<std::string, uint32_t> statusCounts;
+    std::map<std::string, std::string> shaderStatusByKey;
+    std::map<std::string, std::string> shaderStatusReasonByKey;
+    std::map<std::string, std::string> reconstructedFileByKey;
+    std::map<std::string, std::string> reconstructionErrorByKey;
+    std::map<std::string, std::string> exportedResourceByKey;
+    std::map<std::string, std::string> resourceExportErrorByKey;
 
     for(const ActionDescription *action : actions)
     {
@@ -388,7 +593,25 @@ public:
       std::ostringstream eventJson;
       eventJson << "    {\n      \"eventId\": " << action->eventId << ",\n";
       eventJson << "      \"name\": \"" << JsonEscape(ToStd(action->customName))
-                << "\",\n      \"stages\": [\n";
+                << "\",\n";
+      const rdcarray<VertexInputAttribute> vertexInputs = pipe.GetVertexInputs();
+      eventJson << "      \"vertexInputs\": [";
+      for(size_t inputIndex = 0; inputIndex < vertexInputs.size(); inputIndex++)
+      {
+        const VertexInputAttribute &input = vertexInputs[inputIndex];
+        if(inputIndex > 0)
+          eventJson << ",";
+        eventJson << "\n        {\n          \"name\": \""
+                  << JsonEscape(ToStd(input.name)) << "\",\n          \"vertexBuffer\": "
+                  << input.vertexBuffer << ",\n          \"byteOffset\": " << input.byteOffset
+                  << ",\n          \"perInstance\": " << (input.perInstance ? "true" : "false")
+                  << ",\n          \"instanceRate\": " << input.instanceRate
+                  << ",\n          \"format\": \"" << JsonEscape(ToStd(input.format.Name()))
+                  << "\",\n          \"genericEnabled\": "
+                  << (input.genericEnabled ? "true" : "false")
+                  << ",\n          \"used\": " << (input.used ? "true" : "false") << "\n        }";
+      }
+      eventJson << "\n      ],\n      \"stages\": [\n";
       bool wroteStage = false;
 
       for(uint32_t stageIndex = 0; stageIndex < (uint32_t)ShaderStage::Count; stageIndex++)
@@ -426,20 +649,60 @@ public:
                                        (hlslTarget ? ".hlsl" : ".disasm.txt");
         const std::string binaryFile = "shaders/" + shaderStem + ".bin";
         const std::string reflectionFile = "shaders/" + shaderStem + ".reflection.txt";
-        const std::string shaderLabFile = "shaders/" + shaderStem + ".shader";
         const std::string decompiledText = ToStd(decompiled);
+        const bool hasRawBytes = rawByteCount > 0;
+        const bool hasDisassembly = !decompiledText.empty();
+        const bool hasExternalResources = !reflection->constantBlocks.empty() ||
+                                          !reflection->samplers.empty() ||
+                                          !reflection->readOnlyResources.empty() ||
+                                          !reflection->readWriteResources.empty();
+        const bool isSpirv = reflection->encoding == ShaderEncoding::SPIRV ||
+                             reflection->encoding == ShaderEncoding::OpenGLSPIRV;
+        const std::string reconstructedFile = "shaders/" + shaderStem + ".reconstructed.hlsl";
+        bool reconstructed = false;
+        std::string reconstructionError;
         if(exportedShaders.insert(shaderRecordKey).second)
         {
           if((rawByteCount > 0 &&
               !WriteBinary(JoinPath(output, binaryFile), reflection->rawBytes.data(), rawByteCount)) ||
              (rawByteCount == 0 && !WriteText(JoinPath(output, binaryFile), "No raw shader bytes.")) ||
              !WriteText(JoinPath(output, shaderFile), decompiledText) ||
-             !WriteText(JoinPath(output, reflectionFile), reflectionText) ||
-             !WriteText(JoinPath(output, shaderLabFile),
+             !WriteText(JoinPath(output, reflectionFile), reflectionText))
+          {
+            std::cerr << "Couldn't write shader export for event " << action->eventId << std::endl;
+            controller->Shutdown();
+            return 1;
+          }
+
+          if(reconstruct && isSpirv && hasRawBytes)
+          {
+            if(spirvCross.empty())
+              reconstructionError = "--reconstruct requires --spirv-cross <path>.";
+            else
+              reconstructed = RunSpirvCross(spirvCross, output, binaryFile, reconstructedFile,
+                                            stage, ToStd(entry.name), reconstructionError);
+          }
+
+          const char *status = ReconstructionStatusName(
+              hasRawBytes, hasDisassembly, hasExternalResources, reconstructed);
+          const std::string statusReason = ReconstructionStatusReason(
+              hasRawBytes, hasDisassembly, hasExternalResources, reconstructed, reconstruct,
+              isSpirv, reconstructionError);
+          statusCounts[status]++;
+          shaderStatusByKey[shaderRecordKey] = status;
+          shaderStatusReasonByKey[shaderRecordKey] = statusReason;
+          if(reconstructed)
+            reconstructedFileByKey[shaderRecordKey] = reconstructedFile;
+          if(!reconstructionError.empty())
+            reconstructionErrorByKey[shaderRecordKey] = reconstructionError;
+
+          if(emitPlaceholders &&
+             !WriteText(JoinPath(output, "shaders/" + shaderStem + ".shader"),
                         ShaderLabTemplate(action->eventId, stage, ToStd(entry.name), shaderFile,
                                           target, decompiledText)))
           {
-            std::cerr << "Couldn't write shader export for event " << action->eventId << std::endl;
+            std::cerr << "Couldn't write legacy ShaderLab placeholder for event "
+                      << action->eventId << std::endl;
             controller->Shutdown();
             return 1;
           }
@@ -454,9 +717,43 @@ public:
                       << ",\n      \"source\": \"" << shaderFile
                       << "\",\n      \"binary\": \"" << binaryFile
                       << "\",\n      \"reflection\": \"" << reflectionFile
-                      << "\",\n      \"shaderLab\": \"" << shaderLabFile << "\"\n    }";
+                      << "\",\n      \"status\": \"" << status
+                      << "\",\n      \"statusReason\": \""
+                      << JsonEscape(statusReason) << "\"";
+          if(reconstructed)
+            shaderIndex << ",\n      \"reconstructedHlsl\": \""
+                        << reconstructedFile << "\"";
+          if(emitPlaceholders)
+            shaderIndex << ",\n      \"shaderLabPlaceholder\": \"shaders/" << shaderStem
+                        << ".shader\"";
+          if(!reconstructionError.empty())
+            shaderIndex << ",\n      \"reconstructionError\": \""
+                        << JsonEscape(reconstructionError) << "\"";
+          shaderIndex << "\n    }";
           wroteShader = true;
         }
+
+        std::string status = ReconstructionStatusName(
+            hasRawBytes, hasDisassembly, hasExternalResources, reconstructed);
+        std::string statusReason = ReconstructionStatusReason(
+            hasRawBytes, hasDisassembly, hasExternalResources, reconstructed, reconstruct,
+            isSpirv, reconstructionError);
+        std::map<std::string, std::string>::const_iterator statusIt =
+            shaderStatusByKey.find(shaderRecordKey);
+        if(statusIt != shaderStatusByKey.end())
+          status = statusIt->second;
+        std::map<std::string, std::string>::const_iterator reasonIt =
+            shaderStatusReasonByKey.find(shaderRecordKey);
+        if(reasonIt != shaderStatusReasonByKey.end())
+          statusReason = reasonIt->second;
+        const std::string reconstructedPath =
+            reconstructedFileByKey.count(shaderRecordKey) > 0
+                ? reconstructedFileByKey[shaderRecordKey]
+                : std::string();
+        const std::string reconstructionFailure =
+            reconstructionErrorByKey.count(shaderRecordKey) > 0
+                ? reconstructionErrorByKey[shaderRecordKey]
+                : std::string();
 
         const std::string entryPoint = ToStd(entry.name);
         const std::string pipelineId = ResourceIdName(pipeline);
@@ -508,13 +805,31 @@ public:
                   << "\",\n          \"pipelineId\": \"" << pipelineId
                   << "\",\n          \"source\": \"" << shaderFile
                   << "\",\n          \"reflection\": \"" << reflectionFile
-                  << "\",\n          \"shaderLab\": \"" << shaderLabFile << "\"\n        }";
+                  << "\",\n          \"status\": \"" << JsonEscape(status)
+                  << "\",\n          \"statusReason\": \""
+                  << JsonEscape(statusReason) << "\"";
+        if(!reconstructedPath.empty())
+          eventJson << ",\n          \"reconstructedHlsl\": \""
+                    << reconstructedPath << "\"";
+        if(!reconstructionFailure.empty())
+          eventJson << ",\n          \"reconstructionError\": \""
+                    << JsonEscape(reconstructionFailure) << "\"";
+        eventJson << "\n        }";
         wroteStage = true;
         exportedStages++;
       }
 
       if(!wroteStage)
         continue;
+
+      if(!AppendDrawReplayEvidence(JoinPath(output, "draw-replay-evidence.ndjson"), *action,
+                                   controller->GetStructuredFile()))
+      {
+        std::cerr << "Couldn't write draw replay evidence for event " << action->eventId
+                  << std::endl;
+        controller->Shutdown();
+        return 1;
+      }
 
       eventJson << "\n      ],\n      \"bindings\": [";
       const rdcarray<UsedDescriptor> bindings = pipe.GetAllUsedDescriptors(false);
@@ -528,11 +843,119 @@ public:
                   << "\",\n          \"index\": " << binding.access.index
                   << ",\n          \"arrayElement\": " << binding.access.arrayElement
                   << ",\n          \"type\": " << (uint32_t)binding.access.type
-                  << ",\n          \"resource\": \"" << ResourceIdName(binding.descriptor.resource)
+                  << ",\n          \"typeName\": \"" << DescriptorTypeName(binding.access.type)
+                  << "\",\n          \"resource\": \"" << ResourceIdName(binding.descriptor.resource)
                   << "\",\n          \"secondary\": \"" << ResourceIdName(binding.descriptor.secondary)
                   << "\",\n          \"view\": \"" << ResourceIdName(binding.descriptor.view)
                   << "\",\n          \"byteOffset\": " << binding.descriptor.byteOffset
-                  << ",\n          \"byteSize\": " << binding.descriptor.byteSize << "\n        }";
+                  << ",\n          \"byteSize\": " << binding.descriptor.byteSize;
+        const ResourceDescription *resource = FindResource(resources, binding.descriptor.resource);
+        const TextureDescription *texture = FindTexture(textures, binding.descriptor.resource);
+        if(texture == NULL)
+          texture = FindTexture(textures, binding.descriptor.view);
+        std::string resourceSnapshot;
+        std::string resourceSnapshotError;
+        if(exportResources && texture != NULL)
+        {
+          const std::string resourceKey = "texture|" + ResourceIdName(texture->resourceId);
+          if(exportedResourceByKey.count(resourceKey) > 0)
+            resourceSnapshot = exportedResourceByKey[resourceKey];
+          else if(resourceExportErrorByKey.count(resourceKey) > 0)
+            resourceSnapshotError = resourceExportErrorByKey[resourceKey];
+          else
+          {
+            resourceSnapshot = "resources/texture_" +
+                               SafeName(ResourceIdName(texture->resourceId)) + ".dds";
+            TextureSave save;
+            save.resourceId = texture->resourceId;
+            save.destType = FileType::DDS;
+            save.mip = -1;
+            const ResultDetails saved =
+                controller->SaveTexture(save, FromStd(JoinPath(output, resourceSnapshot)));
+            if(!saved.OK())
+            {
+              resourceSnapshotError = ToStd(saved.Message());
+              resourceSnapshot.clear();
+              resourceExportErrorByKey[resourceKey] = resourceSnapshotError;
+            }
+            else
+            {
+              exportedResourceByKey[resourceKey] = resourceSnapshot;
+            }
+          }
+        }
+        else if(exportResources &&
+                (binding.access.type == DescriptorType::ConstantBuffer ||
+                 binding.access.type == DescriptorType::Buffer ||
+                 binding.access.type == DescriptorType::TypedBuffer ||
+                 binding.access.type == DescriptorType::ReadWriteBuffer ||
+                 binding.access.type == DescriptorType::ReadWriteTypedBuffer) &&
+                binding.descriptor.byteSize > 0)
+        {
+          const uint64_t maxSnapshotSize = 16ULL * 1024ULL * 1024ULL;
+          const std::string resourceKey =
+              "buffer|" + ResourceIdName(binding.descriptor.resource) + "|" +
+              std::to_string(binding.descriptor.byteOffset) + "|" +
+              std::to_string(binding.descriptor.byteSize);
+          if(exportedResourceByKey.count(resourceKey) > 0)
+            resourceSnapshot = exportedResourceByKey[resourceKey];
+          else if(resourceExportErrorByKey.count(resourceKey) > 0)
+            resourceSnapshotError = resourceExportErrorByKey[resourceKey];
+          else if(binding.descriptor.byteSize > maxSnapshotSize)
+          {
+            resourceSnapshotError = "buffer range exceeds the 16 MiB automatic snapshot limit";
+            resourceExportErrorByKey[resourceKey] = resourceSnapshotError;
+          }
+          else
+          {
+            bytebuf data = controller->GetBufferData(binding.descriptor.resource,
+                                                      binding.descriptor.byteOffset,
+                                                      binding.descriptor.byteSize);
+            resourceSnapshot = "resources/buffer_" +
+                               SafeName(ResourceIdName(binding.descriptor.resource)) + "_" +
+                               std::to_string(binding.descriptor.byteOffset) + "_" +
+                               std::to_string(binding.descriptor.byteSize) + ".bin";
+            if(data.empty() ||
+               !WriteBinary(JoinPath(output, resourceSnapshot), data.data(), data.count()))
+            {
+              resourceSnapshotError = "buffer data was unavailable or could not be written";
+              resourceSnapshot.clear();
+              resourceExportErrorByKey[resourceKey] = resourceSnapshotError;
+            }
+            else
+            {
+              exportedResourceByKey[resourceKey] = resourceSnapshot;
+            }
+          }
+        }
+        if(resource != NULL)
+        {
+          eventJson << ",\n          \"resourceName\": \""
+                    << JsonEscape(ToStd(resource->name))
+                    << "\",\n          \"resourceNameAutogenerated\": "
+                    << (resource->autogeneratedName ? "true" : "false");
+        }
+        if(texture != NULL)
+        {
+          eventJson << ",\n          \"textureType\": \"" << TextureTypeName(texture->type)
+                    << "\",\n          \"textureFormat\": \""
+                    << JsonEscape(ToStd(texture->format.Name()))
+                    << "\",\n          \"textureDimension\": " << texture->dimension
+                    << ",\n          \"textureWidth\": " << texture->width
+                    << ",\n          \"textureHeight\": " << texture->height
+                    << ",\n          \"textureDepth\": " << texture->depth
+                    << ",\n          \"textureMips\": " << texture->mips
+                    << ",\n          \"textureArraySize\": " << texture->arraysize
+                    << ",\n          \"textureCube\": " << (texture->cubemap ? "true" : "false")
+                    << ",\n          \"textureSamples\": " << texture->msSamp;
+        }
+        if(!resourceSnapshot.empty())
+          eventJson << ",\n          \"snapshot\": \""
+                    << JsonEscape(resourceSnapshot) << "\"";
+        if(!resourceSnapshotError.empty())
+          eventJson << ",\n          \"snapshotError\": \""
+                    << JsonEscape(resourceSnapshotError) << "\"";
+        eventJson << "\n        }";
       }
       eventJson << "\n      ]\n    }";
       if(wroteEvent)
@@ -551,10 +974,31 @@ public:
     manifest << "{\n  \"format\": \"RenderDocShaderExport/2\",\n"
              << "  \"capture\": \"" << JsonEscape(filename) << "\",\n"
              << "  \"target\": \"" << JsonEscape(target) << "\",\n"
+             << "  \"drawReplayEvidence\": \"draw-replay-evidence.ndjson\",\n"
+             << "  \"reconstruction\": {\n    \"requested\": "
+             << (reconstruct ? "true" : "false") << ",\n    \"spirvCross\": \""
+             << JsonEscape(spirvCross) << "\",\n    \"placeholderTemplates\": "
+             << (emitPlaceholders ? "true" : "false")
+             << ",\n    \"resourceSnapshots\": " << (exportResources ? "true" : "false")
+             << "\n  },\n"
              << "  \"summary\": {\n    \"events\": " << exportedEvents
              << ",\n    \"stageUses\": " << exportedStages
              << ",\n    \"uniqueShaders\": " << exportedShaders.size()
-             << ",\n    \"uniqueVariants\": " << exportedVariants.size() << "\n  },\n"
+             << ",\n    \"uniqueVariants\": " << exportedVariants.size() << ",\n"
+             << "    \"statusCounts\": {";
+    bool wroteStatus = false;
+    for(const std::pair<const std::string, uint32_t> &status : statusCounts)
+    {
+      if(wroteStatus)
+        manifest << ",";
+      manifest << "\n      \"" << JsonEscape(status.first) << "\": " << status.second;
+      wroteStatus = true;
+    }
+    if(wroteStatus)
+      manifest << "\n    }";
+    else
+      manifest << "}";
+    manifest << "\n  },\n"
              << shaderIndex.str() << ",\n" << variantIndex.str() << ",\n"
              << eventIndex.str() << "\n}\n";
     const bool manifestWritten = WriteText(JoinPath(output, "capture.json"), manifest.str());

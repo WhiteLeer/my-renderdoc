@@ -25,6 +25,8 @@
 #include "vk_core.h"
 #include <ctype.h>
 #include <algorithm>
+#include <cstdio>
+#include <mutex>
 #include "core/settings.h"
 #include "driver/ihv/amd/amd_rgp.h"
 #include "driver/ihv/nv/nv_aftermath.h"
@@ -45,6 +47,36 @@ RDOC_EXTERN_CONFIG(bool, Vulkan_Debug_VerboseCommandRecording);
 RDOC_DEBUG_CONFIG(bool, Vulkan_Debug_SingleSubmitFlushing, false,
                   "Every command buffer is submitted and fully flushed to the GPU, to narrow down "
                   "the source of problems.");
+
+static void WriteDrawReplayEvidence(uint64_t chunkOffset, uint32_t eventId,
+                                    VkCommandBuffer commandBuffer, ActionFlags type)
+{
+  const rdcstr path = Process::GetEnvVariable("RENDERDOC_DRAW_MAP_FILE");
+  if(path.empty())
+    return;
+
+  static std::mutex mutex;
+  std::lock_guard<std::mutex> lock(mutex);
+  // FileIO has no append mode; use the platform C runtime for this optional
+  // sidecar so the capture format and RenderDoc logging remain untouched.
+  FILE *file = NULL;
+#if defined(_WIN32)
+  fopen_s(&file, path.c_str(), "ab");
+#else
+  file = std::fopen(path.c_str(), "ab");
+#endif
+  if(file == NULL)
+    return;
+
+  const rdcstr commandBufferId = ToStr(GetResID(commandBuffer));
+  fprintf(file,
+          "{\"schema\":\"renderdoc.draw-replay-evidence.v1\","
+          "\"chunkOffset\":%llu,\"eventId\":%u,\"commandBuffer\":\"%s\","
+          "\"actionFlags\":%u}\n",
+          (unsigned long long)chunkOffset, eventId, commandBufferId.c_str(),
+          (unsigned int)type);
+  std::fclose(file);
+}
 
 uint64_t VkInitParams::GetSerialiseSize()
 {
@@ -741,6 +773,8 @@ uint32_t WrappedVulkan::HandlePreCallback(VkCommandBuffer commandBuffer, ActionF
   }
 
   eventId += multiDrawOffset;
+
+  WriteDrawReplayEvidence(m_CurChunkOffset, eventId, commandBuffer, type);
 
   if(type == ActionFlags::MeshDispatch || type == ActionFlags::Drawcall)
     m_ActionCallback->PreDraw(eventId, type, commandBuffer);

@@ -48,3 +48,10 @@ qrenderdoc/3rdparty/pyside
 .DS_Store
 plugins-*/
 __pycache__
+
+# Local Windows build trees and captured game-resource samples.
+/x64/
+/examples/shader-export/
+*.rdc
+*.srrdc
+*.zzzrdc
