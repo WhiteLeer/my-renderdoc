@@ -1,4 +1,13 @@
-# HSR-4.6-MUMU RenderDoc
+# HSR RenderDoc
+
+## Branch And Version Policy
+
+`HSR` and `ZZZ` are separate long-lived development branches; `main` remains
+the baseline. This branch keeps the HSR MuMu implementation. Client updates
+are recorded in version-specific configuration and validation evidence, not
+new development branches. Former branch tips are available as
+`archive/branches/<former-name>` tags. Existing release tags and capture
+variant markers remain unchanged.
 
 The active client is HSR 4.6.0. Earlier HSR 4.5 captures remain offline regression
 fixtures. Capturing and replaying the new client must be validated separately;
