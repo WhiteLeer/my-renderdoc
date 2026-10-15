@@ -1,4 +1,13 @@
-# ZZZ-3.0-MUMU RenderDoc
+# ZZZ RenderDoc
+
+## Branch And Version Policy
+
+`HSR` and `ZZZ` are separate long-lived development branches; `main` remains
+the baseline. This branch keeps the ZZZ MuMu implementation originally
+developed for ZZZ 3.0; later clients require separate validation. Client
+versions belong in configuration and evidence, not new development branches.
+Former branch tips are available as `archive/branches/<former-name>` tags.
+Existing release tags and capture variant markers remain unchanged.
 
 This branch is a RenderDoc build dedicated to capturing and replaying
 Zenless Zone Zero (ZZZ) running inside MuMu. It is not a ZZZ asset extractor;
